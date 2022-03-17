@@ -1,0 +1,54 @@
+.ig
+Copyright (C) 2021 Charles Atkinson
+
+Permission is granted to make and distribute verbatim copies of this
+manual provided the copyright notice and this permission notice are
+preserved on all copies.
+
+Permission is granted to copy and distribute modified versions of this
+manual under the conditions for verbatim copying, provided that the
+entire resulting derived work is distributed under the terms of a
+permission notice identical to this one.
+
+Permission is granted to copy and distribute translations of this
+manual into another language, under the above conditions for modified
+versions, except that this permission notice may be included in
+translations approved by the Free Software Foundation instead of in
+the original English.
+..
+.\" No adjustment (ragged right)
+.na
+.TH validate_ssh_cmd 8 "17 Mar 2022" "Auroville" "Version 3.2.2"
+.SH NAME
+validate_ssh_cmd \- validate ssh commands for bung
+.SH SYNOPSIS
+\fbvalidate_ssh_cmd
+.SH DESCRIPTION
+validate_ssh_cmd checks the value of
+environment variable SSH_ORIGINAL_COMMAND matches
+one of the three run on remote rsync servers by rsync_bu.
+.SH OPTIONS
+.TP
+Usage note
+.RS
+.nh
+validate_ssh_cmd is intended to be named in
+a remote user's .ssh/authorized_keys after a "command="
+to increase security
+by restricting the commands that the ssh public key can be used for.
+.RE
+.
+.SH ENVIRONMENT
+SSH_ORIGINAL_COMMAND (set by the ssh daemon)
+.SH FILES
+-
+.SH EXAMPLES
+-
+.SH AUTHOR
+Charles Atkinson bung@charlesmatkinson.org
+.SH SEE ALSO
+\fBrsync_bu\fR(5\~and\~8),
+\fBvalidate_ssh_cmd\fR(5)
+.br
+The bung user guide,
+normally installed in /usr/share/bung/doc

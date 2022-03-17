@@ -1,0 +1,652 @@
+#! /bin/bash
+
+# Copyright (C) 2022 Charles Atkinson
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+
+# Purpose: 
+#   * The hotplug supervisor to run other scripts in the Backup Next 
+#     Generation (bung) suite.
+#   * Intended to be run either:
+#       > By udev on a hotplug backup storage device plug in event.
+#       > By bung's super_bu to update the data on a hotplug backup storage
+#         device that is already plugged in.
+
+# Usage: 
+#   See usage.fun or use -h option.
+    
+# Programmers' notes: error and trap handling: 
+#   * All errors are fatal and finalise() is called.
+#   * At any time, a trapped event may transfer control to finalise().
+#   * To allow finalise() to tidy up before exiting, changes that need to be
+#     undone are noted with global variables named <change name>_flag and the
+#     data required to undo those changes is kept in global variables.
+#   * finalise() uses the same functions to undo the changes as are used when
+#     they are undone routinely.
+#   * $finalising_flag is used to prevent recursive calls when errors are
+#     encountered while finalise() is running,
+
+# Programmers' notes: variable names and values
+#   * Directory names: *_dir.  Their values should not have a trailing /
+#   * File names: *_fn
+#   * Logicals: *_flag containing values $true or $false.
+#     The $true and $false values allow "if [[ $debugging_flag ]]"
+#   * $buf is a localised scratch buffer
+
+# Programmers' notes: file descriptor usage
+#   0 (stdin)- not changed
+#   1 (stdout)- not changed except when logging request when redirected to log
+#   2 (stderr)- not changed except when logging request when redirected to log
+#   3 - used for reading the configuration file
+#   9 - used for locking the PID file
+
+# Programmers' notes: bash library
+#   * May be changed by setting environment variable BUNG_LIB_DIR
+export BUNG_LIB_DIR=${BUNG_LIB_DIR:-/usr/lib/bung}
+source "$BUNG_LIB_DIR/version.scrippet" || exit 1
+
+# Programmers' notes: maximum line length ruler
+# -------+---------+---------+---------+---------+---------+---------+---------+
+#        10        20        30        40        50        60        70        80
+
+# Programmers' notes: function call tree
+#    +
+#    |
+#    +-- initialise
+#    |   |
+#    |   +-- usage
+#    |   |
+#    |   +-- parse_conf
+#    |   |   |
+#    |   |   +-- parse_conf_hotplugdevice
+#    |   |
+#    |   +-- err_trap_email_for_report
+#    |   |
+#    |   +-- postprocess_hotplugdevice
+#    |   |
+#    |   +-- err_trap_hotplugdevice
+#    |   |
+#    |   +-- postprocess_mount_conf
+#    |   |
+#    |   +-- err_trap_mount_conf
+#    |   |
+#    |   +-- postprocess_org_name_conf
+#    |   |
+#    |   +-- err_trap_posthook
+#    |   |
+#    |   +-- err_trap_prehook
+#    |   |
+#    |   +-- err_trap_shutdown
+#    |   |
+#    |   +-- postprocess_snapshot_conf
+#    |   |
+#    |   +-- err_trap_snapshot_conf
+#    |   |
+#    |   +-- err_trap_subsidiary_script_conf
+#    |   |
+#    |   +-- do_pid
+#    |   |
+#    |   +-- do_limits
+#    |
+#    +-- do_snapshots
+#    |
+#    +-- do_mounts
+#    |   |
+#    |   +-- get_fs_type
+#    |   |
+#    |   +-- do_mount_command
+#    |
+#    +-- notify_initially
+#    |
+#    +-- run_subsidiary_scripts
+#    |
+#    +-- finalise
+#        |
+#        +-- notify_finally
+#
+# Utility functions called from various places:
+#     ck_file ck_uint err_trap_uint fct get_x_authority_file
+#     get_hotplug_device_usage msg parse_conf_subkey_value
+#     parse_conf_word msg_on_screen
+
+# Function definitions in alphabetical order.  Execution begins after the last function definition.
+
+source "$BUNG_LIB_DIR/ck_file.fun" || exit 1
+source "$BUNG_LIB_DIR/ck_uint.fun" || exit 1
+source "$BUNG_LIB_DIR/do_limits.fun" || exit 1
+source "$BUNG_LIB_DIR/do_mounts.fun" || exit 1
+source "$BUNG_LIB_DIR/do_pid.fun" || exit 1
+source "$BUNG_LIB_DIR/do_snapshots.fun" || exit 1
+source "$BUNG_LIB_DIR/do_umounts.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_email_for_report.fun" || exit 1
+
+#--------------------------
+# Name: err_trap_hotplug_device
+# Purpose: error traps the hotplug device
+# Arguments: none
+# Return code: always 0; does not return on error
+#--------------------------
+function err_trap_hotplug_device {
+    fct "${FUNCNAME[0]}" 'started'
+    local buf msgi_class
+    local my_emsg=
+    local -r i=0
+
+    # Nothing to do?
+    # ~~~~~~~~~~~~~~
+    if ((hotplug_dev_idx<0)); then
+        emsg+=$msg_lf'No hotplug device configured (no "Hotplug device" keyword)'
+        fct "${FUNCNAME[0]}" "returning, rc 1"
+        return 1
+    fi
+
+    # Does the configured device exist?
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    buf=$(ck_file "${hotplug_dev_path[i]}" b:rw 2>&1)
+    if [[ $buf != '' ]]; then
+        if [[ $udev_flag ]]; then
+            msg_class=E
+        else
+            msg_class=${hotplug_dev_missing_msgclass[i]}
+        fi
+        msg $msg_class "$buf"
+        finalise 0
+    fi
+
+    # Is the configured device a hotplug device?
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    buf=$(find -L /dev/disk/by-path -samefile "${hotplug_dev_path[i]}" 2>&1)
+    if (($?==0)); then
+        case $buf in
+            *-usb-* )
+                ;;
+            * )
+                msg W "${hotplug_dev_path[i]} is not a hotplug device (it is $buf)"
+        esac
+    else
+        msg W "Problems running find -L /dev/disk/by-path -samefile ${hotplug_dev_path[i]}: $buf"
+    fi
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function err_trap_hotplug_device
+
+#--------------------------
+# Name: err_trap_hotplugdevice_conf
+# Purpose: 
+#   Error traps the "Hotplug device" configuration
+# Arguments: none
+# Global variable usage: adds any error message to emsg, prefixed by $msg_lf
+# Output: none
+# Return value: 1 when an error is detected, 0 otherwise
+#--------------------------
+function err_trap_hotplugdevice_conf {
+    fct "${FUNCNAME[0]}" 'started'
+    local buf email my_rc=0 old_emsg path
+    local -r i=0
+
+    # Initialise
+    # ~~~~~~~~~~
+    old_emsg=$emsg
+    emsg=
+    my_rc=0
+ 
+    # Nothing to do?
+    # ~~~~~~~~~~~~~~
+    if ((hotplug_dev_idx<0)); then
+        emsg+=$msg_lf'No hotplug device configured (no "Hotplug device" keyword)'
+        fct "${FUNCNAME[0]}" "returning, rc 1"
+        return 1
+    fi
+
+    # Error traps
+    # ~~~~~~~~~~~
+    case ${hotplug_dev_missing_msgclass[i]} in
+        I | W | E )
+            ;;
+        * )
+            emsg+=$msg_lf'Invalid hotplug_dev_missing_msgclass value'
+            emsg+=" ${hotplug_dev_missing_msgclass[i]}"
+            emsg+=' (not information, warning or error)'
+    esac
+
+    if [[ ${hotplug_dev_note_email[i]} = '' ]]; then
+        [[ ${hotplug_dev_note_email_wait} != '' ]] \
+            && emsg+=$msg_lf'email_wait is only valid when notification_email is configured'
+    else
+        email=${hotplug_dev_note_email[i]}
+        if [[ ! $email =~ ^[A-Za-z0-9._%+-]+(@[A-Za-z0-9.-]+\.[A-Za-z]{2,4})?$ ]]; then
+            emsg+=$msg_lf"notification_email ($email) is not a valid email address"
+        fi
+        err_trap_uint "${hotplug_dev_note_email_wait[i]}" "Invalid email_wait value"
+    fi
+
+    [[ $emsg != '' ]] && my_rc=1
+    emsg=$old_emsg$emsg
+    fct "${FUNCNAME[0]}" "returning, rc $my_rc"
+    return $my_rc
+}  # end of function err_trap_hotplugdevice_conf
+
+source "$BUNG_LIB_DIR/err_trap_mount_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_post_hook_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_pre_hook_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_shutdown.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_snapshot_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_subsidiary_script_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_uint.fun" || exit 1
+source "$BUNG_LIB_DIR/fct.fun" || exit 1
+source "$BUNG_LIB_DIR/finalise.fun" || exit 1
+source "$BUNG_LIB_DIR/get_fs_type.fun" || exit 1
+
+#--------------------------
+# Name: initialise
+# Purpose: sets up environment and parses command line
+#--------------------------
+function initialise {
+    local old_emsg path 
+
+    # Declare locals
+    # Configure shell environment
+    # Initialise envars, globals and locals
+    # Parse command line
+    # Check the config file
+    # Check the PID directory
+    # Set up logging
+    # Set traps
+    # Create temporary directory
+    source "$BUNG_LIB_DIR/initialise_1.scrippet" || exit 1
+    
+    # Parse configuration file
+    # ~~~~~~~~~~~~~~~~~~~~~~~~
+    emsg=
+    hotplug_dev_idx=-1
+    # Note: ensure a space on both sides of each string in the arrays
+    local -A keyword_validation
+    keyword_validation[name]='
+        emailforreport 
+        hotplugdevice 
+        logretention 
+        maxmemorysize 
+        mount 
+        numberofopenfiles
+        organisationname 
+        post_hook 
+        pre_hook 
+        shutdown 
+        snapshot 
+        subsidiaryscript 
+    '
+    keyword_validation[repeat invalid]='
+        hotplugdevice 
+        logretention 
+        maxmemorysize 
+        numberofopenfiles
+        organisationname 
+        shutdown 
+    '
+    local +r keyword_validation
+    parse_conf "$conf_fn"
+
+    # Postprocess and error trap the configuration
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    # Email for report
+    if [[ ! $subsidiary_mode_flag ]]; then
+        postprocess_email_for_report
+        err_trap_email_for_report
+    fi
+
+    # Hotplug device
+    postprocess_hotplugdevice_conf && err_trap_hotplugdevice_conf
+
+    # Limits
+    if [[ ! ${max_memory_size:-} =~ $limits_OK_regex ]]; then
+        emsg+=$msg_lf"Invalid max memory size $max_memory_size"
+        emsg+=" (does not match $limits_OK_regex)"
+    fi
+    if [[ ! ${n_open_files:-} =~ $limits_OK_regex ]]; then
+        emsg+=$msg_lf"Invalid number of open files $n_open_files"
+        emsg+=" (does not match $limits_OK_regex)"
+    fi
+
+    # Log retention
+    err_trap_uint "$log_retention" "Invalid log retention value"
+
+    # Mount
+    postprocess_mount_conf && err_trap_mount_conf
+
+    # Organisation name
+    postprocess_org_name_conf "${org_name:-}" "${org_name_optarg:-}" "$opt_o_flag"
+
+    # Post-hook
+    err_trap_post_hook_conf
+
+    # Pre-hook
+    err_trap_pre_hook_conf
+
+    # Shutdown
+    err_trap_shutdown
+
+    # Snapshot
+    postprocess_snapshot_conf && err_trap_snapshot_conf
+
+    # Subsidiary script
+    err_trap_subsidiary_script_conf
+
+    [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
+
+    # Finish if -C option (check the configuration)
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [[ $conf_check_flag ]] \
+        && { msg I "Configuration check OK for $conf_fn"; finalise 0; }
+
+    # Error trap the hotplug device
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Cannot be done with the configuration error traps because may call
+    # finalise
+    err_trap_hotplug_device
+    
+    # Get the serial number
+    # ~~~~~~~~~~~~~~~~~~~~~
+    path=${hotplug_dev_path[0]}
+    buf=$(readlink --canonicalize-existing -- "$path" 2>&1)
+    if (($?>0)); then
+        msg E "Problems running readlink --canonicalize-existing -- $path: $buf" 
+    fi 
+    hotplug_whole_dev[0]=${buf%%+([[:digit:]])}
+    cmd="udevadm info --query=property --name=${hotplug_whole_dev[0]}"
+    buf=$($cmd 2>&1)
+    if (($? == 0)); then
+        buf=${buf#*ID_SERIAL_SHORT=}
+        hotplug_dev_serno[0]=${buf%%$'\n'*}
+    else
+        msg W "Unexpected output from $cmd: $buf"
+        hotplug_dev_serno[0]='Serial number not known'
+    fi
+    msg I "Device serial number: ${hotplug_dev_serno[0]}"
+
+    # Create and lock the PID file
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    do_pid "$(printf '%q ' "${args[@]}")"
+
+    # Log limits (memory, open files) or set if configured
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    do_limits
+
+    fct "${FUNCNAME[0]}" 'returning'
+}  # end of function initialise
+
+source "$BUNG_LIB_DIR/is_fs_mounted.fun" || exit 1
+source "$BUNG_LIB_DIR/msg.fun" || exit 1
+source "$BUNG_LIB_DIR/msg_on_screen.fun" || exit 1
+source "$BUNG_LIB_DIR/my_cat.fun" || exit 1
+
+#--------------------------
+# Name: notify_initially
+# Purpose: notifies initially -- about not unplugging a hotplug device
+# Arguments: none
+# Global variables:
+#   Read:
+#       hotplug_dev[]
+#       hotplug_dev_idx
+#       hotplug_dev_email[]
+#       hotplug_dev_note_email_wait[]
+#   Set: 
+# Return code: always 0; does not return on error
+#--------------------------
+function notify_initially {
+    fct "${FUNCNAME[0]}" 'started'
+    local body cmd i rc subject wait
+    local \
+      mount_fs_file_saved \
+      mount_fs_spec_saved \
+      mount_idx_saved \
+      mount_ignore_already_mounted \
+      mount_ignore_files_under_fs_file \
+      mount_o_option_saved \
+      pcent \
+      snapshot_idx_saved
+
+    # Save the mount configuration arrays
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    mount_fs_file_saved=("${mount_fs_file[@]}")
+    mount_fs_spec_saved=("${mount_fs_spec[@]}")
+    mount_fsck_saved=("${mount_fsck[@]}")
+    mount_ignore_already_mounted_saved=("${mount_ignore_already_mounted[@]}")
+    mount_ignore_files_under_fs_file_saved=("${mount_ignore_files_under_fs_file[@]}")
+    mount_o_option_saved=("${mount_o_option[@]}")
+    mount_idx_saved=$mount_idx
+    [[ ${mount_snapshot_idx:-} != '' ]] && mount_snapshot_idx_saved=$mount_snapshot_idx
+
+    # For each hotplug device
+    # ~~~~~~~~~~~~~~~~~~~~~~~
+    mount_idx=0
+    mount_ignore_already_mounted[0]=$true
+    mount_ignore_files_under_fs_file[0]=$false
+    mount_o_option[0]=
+    mount_snapshot_idx=-1
+    for ((i=0;i<=hotplug_dev_idx;i++))
+    do
+        # Get the file system usage
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~
+        mount_fs_file[0]=$tmp_dir/mnt
+        cmd=(readlink --canonicalize-existing -- "${hotplug_dev_path[i]}")
+        mount_fs_spec[0]=$("${cmd[@]}" 2>&1)
+        if (($?>0)); then
+            msg E "Problems running ${cmd[*]}: ${mount_fs_spec[0]}"
+        fi
+        mount_fsck[0]=$false
+        do_mounts
+        cmd=(df --output=pcent "${hotplug_dev_path[i]}")
+        run_cmd_with_timeout -w '!=0'
+        if (($?==0)); then
+            pcent=$(tail -1 "$out_fn")
+            pcent=${pcent##* }
+        else
+            pcent=unknown
+        fi
+        body="Initial file system usage is $pcent"
+
+        # On-screen notification
+        # ~~~~~~~~~~~~~~~~~~~~~~
+        subject="Do not unplug $org_name hotplug storage; in use"
+        if [[ ${hotplug_dev_note_screen_flag[i]} ]]; then
+            msg_on_screen warning "$subject" "$body" 'x_msg_pid=yes'
+        fi
+
+        # E-mail notification
+        # ~~~~~~~~~~~~~~~~~~~
+        [[ ${hotplug_dev_note_email[i]} = '' ]] && continue
+        body=$'\n'"Device: ${hotplug_whole_dev[i]}, also referenced as"$'\n'
+        body+=$(find -L /dev/disk/by-path /dev/disk/by-id -samefile "${hotplug_whole_dev[i]}")
+        echo "$body" | mailx -s "$subject" ${hotplug_dev_note_email[i]}
+        msg I "Notified ${hotplug_dev_note_email[i]}: $subject"
+        wait=${hotplug_dev_note_email_wait[i]}
+        if ((wait>0)); then
+            msg I "Waiting $wait seconds for the notification(s) to be received"
+            sleep $wait &   #  Background and wait so is interruptable
+            wait
+        fi
+    done
+
+    # Restore the mount configuration arrays and index
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    do_umounts
+    mount_done_mountpoint_idx=-1
+    mount_fs_file=("${mount_fs_file_saved[@]}")
+    mount_fs_spec=("${mount_fs_spec_saved[@]}")
+    mount_fsck=("${mount_fsck_saved[@]}")
+    mount_ignore_already_mounted=("${mount_ignore_already_mounted_saved[@]}")
+    mount_ignore_files_under_fs_file=("${mount_ignore_files_under_fs_file_saved[@]}")
+    mount_o_option=("${mount_o_option_saved[@]}")
+    mount_idx=$mount_idx_saved
+    [[ ${mount_snapshot_idx_saved:-} != '' ]] && mount_snapshot_idx=$mount_snapshot_idx_saved
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function notify_initially
+
+source "$BUNG_LIB_DIR/parse_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/parse_conf_hotplugdevice.fun" || exit 1
+source "$BUNG_LIB_DIR/parse_conf_subsidiaryscript.fun" || exit 1
+source "$BUNG_LIB_DIR/parse_conf_word.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_email_for_report.fun" || exit 1
+
+#--------------------------
+# Name: postprocess_hotplugdevice_conf
+# Purpose:
+#   Processes "Hotplug device" values from the configuration file
+# Arguments: none
+# Global variable usage:
+#   Sets hotplug_dev_missing_msgclass[i]
+#   May default hotplug_dev_note_email_wait[i]
+# Output: none
+# Return value: always 0
+#--------------------------
+function postprocess_hotplugdevice_conf {
+    fct "${FUNCNAME[0]}" started
+    local -r i=0
+
+    # Nothing to do?
+    # ~~~~~~~~~~~~~~
+    if ((hotplug_dev_idx==-1)); then
+        fct "${FUNCNAME[0]}" 'returning (nothing to do)'
+        return 0
+    fi
+
+    # Normalise and set defaults
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    case ${hotplug_dev_missing_msgclass[i],,} in
+        information )
+            hotplug_dev_missing_msgclass[i]=I
+            ;;
+        warning | '' )
+            hotplug_dev_missing_msgclass[i]=W
+            ;;
+        error )
+            hotplug_dev_missing_msgclass[i]=E
+    esac
+
+    [[ ${hotplug_dev_note_email[i]} != '' \
+        && ${hotplug_dev_note_email_wait[i]} = '' \
+    ]] && hotplug_dev_note_email_wait[i]=600
+
+    fct "${FUNCNAME[0]}" returning
+}  # End of function postprocess_hotplugdevice_conf
+
+source "$BUNG_LIB_DIR/postprocess_mount_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_org_name_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_snapshot_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/run_cmd_with_timeout.fun" || exit 1
+source "$BUNG_LIB_DIR/run_pre_hooks.fun" || exit 1
+source "$BUNG_LIB_DIR/run_subsidiary_scripts.fun" || exit 1
+
+#--------------------------
+# Name: update_hotplug_device_usage_log
+# Purpose: updates the hotplug device usage log
+# Arguments: none
+# Global variables:
+#   Read: hotplug_dev
+#   Read: hotplug_device_usage_log_fn
+# Return code: always 0; does not return on error
+#--------------------------
+function update_hotplug_device_usage_log {
+    fct "${FUNCNAME[0]}" 'started'
+    local buf dev dir emsg i usage_log_cp_fn usage_log_fn
+
+    # Development note
+    # ~~~~~~~~~~~~~~~~
+    # This is written to support a single organisation backing up to more than
+    # one hotplug device; at the time of writing the same was not supported by
+    # the check_hotplug_usage script.
+
+    # Programming note
+    # ~~~~~~~~~~~~~~~~
+    # Error messages here are generated as warnings (and finalise called
+    # directly) instead of as errors because the backup(s) are already done
+    # without error.
+
+    # Make a temporary copy of the usage log
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    emsg=
+    dir=$log_dir/hotplug
+    mkdir -p "$dir" 2>/dev/null
+    buf=$(ck_file "$dir" d:rwx 2>&1)
+    if [[ $buf = '' ]]; then
+        fn=$dir/$org_name
+        usage_log_fn=$fn
+        touch "$fn" 2>/dev/null
+        buf=$(ck_file "$fn" f:w 2>&1)
+        if [[ $buf = '' ]]; then
+            usage_log_cp_fn=$tmp_dir/usage_log
+            buf=$(cp "$usage_log_fn" "$usage_log_cp_fn" 2>&1) 
+            [[ $buf != '' ]] \
+                && emsg="Problem making a temporary copy of the usage log: $buf"
+        else
+            emsg="Hotplug device usage log: $buf"
+        fi
+    else
+        emsg="Hotplug device usage log directory: $buf"
+    fi 
+    if [[ $emsg != '' ]]; then
+        msg W "$emsg"
+        fct "${FUNCNAME[0]}" 'returning 1'
+        finalise 1
+    fi
+
+    # For each hotplug device
+    # ~~~~~~~~~~~~~~~~~~~~~~~
+    for ((i=0;i<=hotplug_dev_idx;i++))
+    do
+        # Append the date and serial number to the temporary log
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        buf=$(echo "$(date --iso) ${hotplug_dev_serno[i]}" >> "$usage_log_cp_fn" 2>&1)
+        [[ $buf != '' ]] \
+            && emsg="Problem appending to the temporary copy of the usage log: $buf"
+    done
+    if [[ $emsg != '' ]]; then
+        msg W "$emsg"
+        fct "${FUNCNAME[0]}" 'returning 1'
+        finalise 1
+    fi
+
+    # Update the usage log 
+    # ~~~~~~~~~~~~~~~~~~~~
+    buf=$(sort -u "$usage_log_cp_fn" > "$usage_log_fn" 2>&1)
+    if [[ $buf != '' ]]; then
+        msg W "Unable to update the usage log: $buf"
+        fct "${FUNCNAME[0]}" 'returning 1'
+        finalise 1
+    fi
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function update_hotplug_device_usage_log
+
+source "$BUNG_LIB_DIR/usage.fun" || exit 1
+
+#--------------------------
+# Name: main
+# Purpose: where it all happens
+#--------------------------
+[[ ${BUNG_COMPGEN_DIR:-} != '' ]] && compgen -v >> $BUNG_COMPGEN_DIR/initial.vars
+initialise "${@:-}"
+notify_initially
+do_snapshots
+do_mounts
+((pre_hook_idx>-1)) && run_pre_hooks
+run_subsidiary_scripts
+update_hotplug_device_usage_log
+finalise 0

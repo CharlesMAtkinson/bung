@@ -1,0 +1,718 @@
+#! /bin/bash
+
+# Copyright (C) 2022 Charles Atkinson
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+
+# Purpose:
+#   Either:
+#   * Reports the existence of a given directory
+#   * Removes YYYY/Mmm/DD@HH:mm subtrees from a given directory that were
+#     modified (= created) more than a given number of days ago
+
+# Usage:
+#   See usage.fun or use -h option.
+
+# Programmers' notes: error and trap handling:
+#   * All errors are fatal and finalise() is called.
+#   * At any time, a trapped event may transfer control to finalise().
+#   * To allow finalise() to tidy up before exiting, changes that need to be
+#     undone are noted with global variables named <change name>_flag and the
+#     data required to undo those changes is kept in global variables.
+#   * finalise() uses the same functions to undo the changes as are used when
+#     they are undone routinely.
+#   * $finalising_flag is used to prevent recursive calls when errors are
+#     encountered while finalise() is running,
+
+# Programmers' notes: variable names and values
+#   * Directory names: *_dir.  Their values should not have a trailing /
+#   * File names: *_fn
+#   * Logicals: *_flag containing values $true or $false.
+#     The $true and $false values allow "if [[ $debugging_flag ]]"
+#   * $buf is a localised scratch buffer
+
+# Programmers' notes: file descriptor usage
+#   0 (stdin) not changed
+#   1 (stdout) redirected to log
+#   2 (stderr) redirected to log
+#   3 original stdout when not logging to /dev/tty
+#   4 original stderr when not logging to /dev/tty
+#   9 for locking the PID file
+
+# Programmers' notes: bash library
+#   * May be changed by setting environment variable BUNG_LIB_DIR
+export BUNG_LIB_DIR=${BUNG_LIB_DIR:-/usr/lib/bung}
+source "$BUNG_LIB_DIR/version.scrippet" || exit 1
+
+# Programmers' notes: function call tree
+#    +
+#    |
+#    +-- initialise
+#    |   |
+#    |   +-- usage
+#    |   |
+#    |   +-- err_trap_uint
+#    |   |   |
+#    |   |   + ck_uint
+#    |   |
+#    |   +-- do_pid
+#    |
+#    +-- backup_dir
+#    |
+#    +-- dir_report
+#    |
+#    +-- finalise
+#
+# Utility functions called from various places:
+#     ck_file fct msg
+
+# Function definitions in alphabetical order.  Execution begins after the last function definition.
+
+#--------------------------
+# Name: backup_dir
+# Purpose:
+#   * Removes YYYY/Mmm/DD@HH:mm subtrees from the given directory that were
+#     modified (= created) more than a given number of days ago
+#--------------------------
+function backup_dir {
+    fct "${FUNCNAME[0]}" 'started'
+    local buf find_empty_cmd msg find_old_cmd
+    local -r backup_subdir_regex='./20[[:digit:]]{2}/[[:alpha:]]{3}/[[:digit:]]{2}@[[:digit:]]{2}:[[:digit:]]{2}'
+
+    # Make the given directory current
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    buf=$(ck_file "$conf_file_content" d:rx 2>&1)
+    if [[ $buf != '' ]]; then
+        msg E "$buf"
+    fi
+    cd "$conf_file_content" || finalise 1
+
+    # Remove old subtrees
+    # ~~~~~~~~~~~~~~~~~~~
+    msg I 'Removing old subtrees'
+    find_old_cmd=(
+        find
+        .
+        -maxdepth 3
+        -regextype posix-egrep
+        -mtime +$retention
+        -regex "$backup_subdir_regex"
+        -type d
+        -exec rm -fr {} ';'
+    )
+    msg D "${FUNCNAME[0]}: find_old_cmd: ${find_old_cmd[*]}"
+    buf=$("${find_old_cmd[@]}" 2>&1)
+    [[ $buf != '' ]] && msg E "$buf"
+
+    # Remove empty directories
+    # ~~~~~~~~~~~~~~~~~~~~~~~
+    msg I 'Removing empty directories'
+    find_empty_cmd=(
+        find
+        .
+        -depth -mindepth 1 -type d -empty -delete
+    )
+    msg D "${FUNCNAME[0]}: find_empty_cmd: ${find_empty_cmd[*]}"
+    buf=$("${find_empty_cmd[@]}" 2>&1)
+    [[ $buf != '' ]] && msg E "$buf"
+
+    fct "${FUNCNAME[0]}" 'returning'
+}  # end of function backup_dir
+
+source "$BUNG_LIB_DIR/ck_file.fun" || exit 1
+source "$BUNG_LIB_DIR/ck_uint.fun" || exit 1
+
+#--------------------------
+# Name: dir_report
+# Purpose:
+#   * Reports the existence of a given directory
+#--------------------------
+function dir_report {
+    fct "${FUNCNAME[0]}" 'started'
+
+    if [[ -d "$conf_file_content" ]]; then
+        msg A Exists
+    else
+        msg A 'Does not exist, is not a directory or is unreachable'
+    fi
+
+    fct "${FUNCNAME[0]}" 'returning'
+}  # end of function dir_report
+
+source "$BUNG_LIB_DIR/do_pid.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_uint.fun" || exit 1
+source "$BUNG_LIB_DIR/fct.fun" || exit 1
+
+#--------------------------
+# Name: finalise
+# Purpose: cleans up and exits
+# Arguments:
+#    $1  return value
+# Return code (on exit):
+#   The sum of zero plus
+#      1 if any warnings
+#      2 if any errors
+#      4,8,16 unused
+#      32 if terminated by a signal
+#--------------------------
+function finalise {
+    fct "${FUNCNAME[0]}" "started with args $*"
+    [[ ${BUNG_COMPGEN_DIR:-} != '' ]] && compgen -v >> $BUNG_COMPGEN_DIR/final.vars
+    local buf logger_msg local msg my_exit_code subject
+
+    finalising_flag=$true
+
+    # Interrupted?  Message and exit return value
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    my_exit_code=0
+    if ck_uint "${1:-}"; then
+        if (($1>128)); then    # Trapped interrupt
+            interrupt_flag=$true
+            i=$((128+${#sig_names[*]}))    # Max valid interrupt code
+            if (($1<i)); then
+                my_exit_code=$1
+                sig_name=${sig_names[$1-128]}
+                msg I "Finalising on $sig_name"
+                [[ ${summary_fn:-} != '' ]] \
+                    && echo "Finalising on $sig_name" >> "$summary_fn"
+            else
+               msg="${FUNCNAME[0]} called with invalid exit value '${1:-}'"
+               msg+=" (> max valid interrupt code $i)"
+               msg E "$msg"    # Returns because finalising_flag is set
+            fi
+        fi
+    fi
+
+    # Old log removal
+    # ~~~~~~~~~~~~~~~
+    # This is not made dependent on $logging_flag in case
+    # old logs exist for this script and configuration file combination
+    if [[ $conf_name != '(unknown config)' ]]; then
+        buf=$(find "$log_dir" -name "$script_name+$conf_name.*.log" -mtime +$log_retention -execdir rm {} \; 2>&1)
+        [[ $buf != '' ]] && msg W "Problem removing old logs: $buf"
+    fi
+
+    # Exit return value adjustment
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    if [[ $warning_flag ]]; then
+        msg I "There was at least one WARNING"
+        ((my_exit_code+=1))
+    fi
+    if [[ $error_flag ]]; then
+        msg I "There was at least one ERROR"
+        ((my_exit_code+=2))
+    fi
+    [[ $interrupt_flag ]] && msg I 'There was at least one interrupt'
+    if ((my_exit_code==0)) && ((${1:-0}!=0)); then
+        msg E 'There was an error not reported in detail (probably by ... || finalise 1)'
+        my_exit_code=2
+    fi
+    msg I "Exiting with return value $my_exit_code"
+
+    # Final messages
+    # ~~~~~~~~~~~~~~
+    if [[ $logging_flag ]]; then
+        subject="$org_name $conf_name $(date --iso)"
+        if [[ ! $warning_flag \
+            && ! $error_flag \
+            && ! $interrupt_flag \
+        ]]; then
+            logger_msg='no problems detected'
+        elif [[ $error_flag || $interrupt_flag ]]; then
+            logger_msg='ERROR detected'
+        else
+            logger_msg='WARNING issued'
+        fi
+        buf=$(logger -i -t "$script_name+$conf_name" "$logger_msg" 2>&1)
+        [[ $buf != '' ]] && msg W "logger command problem: $buf"
+    fi
+
+    # PID file removal
+    # ~~~~~~~~~~~~~~~~
+    [[ $pid_file_locked_flag ]] && rm "$pid_fn"
+
+    # Exit
+    # ~~~~
+    fct "${FUNCNAME[0]}" 'exiting'
+    exit $my_exit_code
+}  # end of function finalise
+
+#--------------------------
+# Name: initialise
+# Purpose: sets up environment and parses command line
+#--------------------------
+function initialise {
+
+    local args log_dir_realpath msg_part opt_L_log_dir
+    local opt opt_b_flag opt opt_c_flag opt_D_flag opt_l_flag opt_L_flag opt_t_flag
+    local -r absolute_path_regex='^/'
+
+    # Configure shell environment
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    export LANG=en_GB.UTF-8
+    export LANGUAGE=en_GB.UTF-8
+    for var_name in LC_ADDRESS LC_ALL LC_COLLATE LC_CTYPE LC_IDENTIFICATION \
+        LC_MEASUREMENT LC_MESSAGES LC_MONETARY LC_NAME LC_NUMERIC LC_PAPER \
+        LC_TELEPHONE LC_TIME
+    do
+        unset $var_name
+    done
+
+    export PATH=/usr/sbin:/sbin:/usr/bin:/bin
+    IFS=$' \n\t'
+    set -o nounset
+    shopt -s extglob            # Enable extended pattern matching operators
+    unset CDPATH                # Ensure cd behaves as expected
+    umask 022
+
+    # Initialise environment variables
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # If these are already set, they are not changed
+    # BUNG_LIB_DIR is set by the calling script and used to source this scrippet
+    export BUNG_BIN_DIR=${BUNG_BIN_DIR:-/usr/bin}
+
+    # Initialise some global logic variables
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    readonly false=
+    readonly true=true
+
+    backup_dir_mode_flag=$false
+    debugging_flag=$false
+    dir_report_mode_flag=$false
+    error_flag=$false
+    finalising_flag=$false
+    interrupt_flag=$false
+    logging_flag=$false
+    pid_file_locked_flag=$false
+    warning_flag=$false
+
+    # Initialise some global string variables
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    conf_name='(unknown config)'
+    fn_date_format='%Y-%m-%d@%H:%M:%S'
+    log_retention=28
+    org_name='(unknown organisation)'
+    readonly log_date_format='+%H:%M:%S'   # date command format used in log messages
+    readonly msg_lf=$'\n    '              # Message linefeed and indent
+    readonly script_name=${0##*/}
+    readonly sig_names=(. $(kill -L | sed 's/[[:digit:]]*)//g'))
+
+    # Default the conf, log and tmp dirs
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    user_name=$(id --user --name)
+    if [[ $user_name = root ]]; then
+        log_dir=/var/log/bung
+        tmp_dir_root=/run/bung
+    else
+        user_home_dir_emsg=
+        user_home_dir=$(getent passwd "$user_name" | cut -f6 -d:)
+        [[ $user_home_dir = '' ]] && user_home_dir_emsg+=$msg_lf"User $user_name has no home directory"
+        user_home_dir=${user_home_dir%/}    # Strip any trailing /
+        buf=$(ck_file "$user_home_dir" d:rwx: 2>&1)
+        [[ $buf != '' ]] && user_home_dir_emsg+=$msg_lf"$user_name home directory: $buf"
+        log_dir=$user_home_dir/var/log/bung
+        tmp_dir_root=$user_home_dir/var/run/bung
+    fi
+    # Envars have the higest priority below command line options
+    if [[ ${BUNG_LOG_DIR:-} != '' ]]; then
+        log_dir=$BUNG_LOG_DIR
+    fi
+    if [[ ${BUNG_TMP_DIR:-} != '' ]]; then
+        tmp_dir_root=$BUNG_TMP_DIR
+    fi
+
+    # Initialise local variables
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    opt_b_flag=$false
+    opt_c_flag=$false
+    opt_D_flag=$false
+    opt_r_flag=$false
+    opt_l_flag=$false
+    opt_L_flag=$false
+    opt_t_flag=$false
+
+    # Parse command line
+    # ~~~~~~~~~~~~~~~~~~
+    # Syntax shown in usage function below
+    args=("$@")
+    emsg=
+    while getopts :b:c:Ddhl:L:t: opt "$@"
+    do
+        case $opt in
+            b )
+                backup_dir_mode_flag=$true
+                opt_b_flag=$true
+                retention=$OPTARG
+                ;;
+            c )
+                conf_fn=$OPTARG
+                opt_c_flag=$true
+                ;;
+            d )
+                debugging_flag=$true
+                ;;
+            D )
+                dir_report_mode_flag=$true
+                opt_D_flag=$true
+                ;;
+            h )
+                debugging_flag=$false
+                usage verbose
+                exit 0
+                ;;
+            l )
+                log_fn=$OPTARG
+                opt_l_flag=$true
+                ;;
+            L )
+                opt_L_log_dir=$OPTARG
+                opt_L_flag=$true
+                ;;
+            t )
+                tmp_root_idir=$OPTARG
+                opt_t_flag=$true
+                ;;
+            : )
+                emsg+=$msg_lf"Option $OPTARG must have an argument"
+                case $OPTARG in
+                    c ) opt_c_flag=$true ;;
+                    l ) opt_l_flag=$true ;;
+                esac
+                ;;
+            * )
+                emsg+=$msg_lf"Invalid option '-$OPTARG'"
+        esac
+    done
+
+    # Check option arguments
+    # ~~~~~~~~~~~~~~~~~~~~~~
+    if [[ $opt_L_flag ]]; then
+        log_dir_realpath=$(readlink --canonicalize-missing -- "$log_dir" 2>&1)
+        if (($?==0)); then
+            buf=$(ck_file "$log_dir_realpath" d:rwx: 2>&1)
+            [[ $buf != '' ]] \
+                && emsg+=$msg_lf"Invalid -L option value '$log_dir': $buf"
+        else
+           emsg+=$msg_lf"Invalid -L option value '$log_dir' ($log_dir_realpath)"
+        fi
+    fi
+    if [[ $opt_l_flag && $log_fn != /dev/tty ]]; then
+        log_dir=${log_fn%/*}
+        log_dir_realpath=$(readlink --canonicalize-missing -- "$log_dir" 2>&1)
+        if (($?==0)); then
+            buf=$(ck_file "$log_dir_realpath" d:rwx: 2>&1)
+            [[ $buf != '' ]] \
+                && emsg+=$msg_lf"Invalid -l option value '$log_fn': $buf"
+        else
+           emsg+=$msg_lf"Invalid -l option value '$log_fn' ($log_dir_realpath)"
+        fi
+    fi
+    if [[ ! $opt_l_flag && ! $opt_L_flag ]]; then    # Not specified so the default is effective
+        if [[ $user_name = root || $user_home_dir_emsg != '' ]]; then
+            log_dir_realpath=$(readlink --canonicalize-missing -- "$log_dir" 2>&1)
+            if (($?==0)); then
+                buf=$(ck_file "$log_dir_realpath" d:rwx: 2>&1)
+                [[ $buf != '' ]] \
+                    && emsg+=$msg_lf"Default log directory '$log_dir': $buf"
+            else
+               emsg+=$msg_lf"Default log directory '$log_dir' ($log_dir_realpath)"
+            fi
+        else
+            emsg+=$user_home_dir_emsg
+        fi
+    fi
+    if [[ $opt_t_flag ]]; then
+        if [[ ! $tmp_dir_root =~ $absolute_path_re ]]; then
+            if [[ $user_name = root ]]; then
+                tmp_dir_root=/run/bung/$tmp_dir_root
+            else
+                [[ $user_name != root && $user_home_dir_emsg != '' ]] \
+                    && emsg+=$user_home_dir_emsg
+                tmp_dir_root=$user_home_dir/var/run/bung/$tmp_dir_root
+            fi
+        fi
+        tmp_dir_realpath=$(readlink --canonicalize-missing -- \
+            "$tmp_dir_root" 2>&1)
+        if (($?==0)); then
+            buf=$(ck_file "$tmp_dir_realpath" d:rwx: 2>&1)
+            if [[ $buf != '' ]]; then
+                emsg+=$msg_lf'Invalid -t option value'
+                emsg+=" '$tmp_dir_root': $buf"
+            fi
+        else
+           emsg+=$msg_lf'Invalid -t option value'
+           emsg+=" '$tmp_dir_root' ($tmp_dir_realpath)"
+        fi
+    fi
+
+    # Test for mutually exclusive options
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [[ $opt_D_flag && $opt_b_flag ]] \
+        && emsg+=$msg_lf'One and only one of -b and -D is required'
+    [[ $opt_l_flag && $opt_L_flag ]] \
+        && emsg+=$msg_lf'Only one of -l and -L can be used'
+
+    # Test for mandatory options not set
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [[ ! $opt_b_flag && ! $opt_D_flag ]] \
+        && emsg+=$msg_lf'-b or -D is required'
+    [[ ! $opt_c_flag ]] && emsg+=$msg_lf'-c option is required'
+
+    # Test for extra arguments
+    # ~~~~~~~~~~~~~~~~~~~~~~~~
+    shift $(($OPTIND-1))
+    if [[ $* != '' ]]; then
+        emsg+=$msg_lf"Invalid extra argument(s) '$*'"
+    fi
+
+    # Report any errors
+    # ~~~~~~~~~~~~~~~~~
+    if [[ $emsg != '' ]]; then
+        msg E "$emsg"
+    fi
+
+    # Check the tmp root directory
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # The tmp_dir_root directory is the PID directory and parent of the temporary directory
+    mkdir -p "$tmp_dir_root" 2>/dev/null
+    buf=$(ck_file "$tmp_dir_root" d:rwx: 2>&1)
+    [[ $buf != '' ]] && msg E "$buf"
+    pid_dir=$tmp_dir_root
+
+    # Set up logging
+    # ~~~~~~~~~~~~~~
+    # Default is to log to file because normal usage is not interactive
+    conf_name=${conf_fn##*/}    # Used when logging via logger
+    if [[ ${log_fn:-} = '' ]]; then
+        buf=$(ck_file "$log_dir" d:rwx: 2>&1)
+        if [[ $buf = '' ]]; then
+            log_fn=$log_dir/$script_name.$(date '+%Y-%m-%d').log
+            buf=$(touch "$log_fn" 2>&1)
+            if (($?>0)); then
+                msg E "cannot create $log_fn: $buf"
+            fi
+        else
+            msg E "cannot create log: $buf"
+        fi
+    fi
+    exec 3<&1    # Original stdout
+    exec 4<&1    # Original stderr
+    if [[ ${log_fn:-} != /dev/tty ]]; then
+        logging_flag=$true
+    fi
+    exec >>"$log_fn"
+    exec 2>>"$log_fn"
+
+    # Up to this point any messages have been given using echo followed by exit 1.  Now
+    # the essentials for msg() and finalise() have been established, all future messages
+    # will be sent using msg() which will call finalise() when called with an error message.
+
+    fct 'initialise' 'started (this message delayed until logging initialised)'
+    msg I "$script_name+$conf_name $script_ver started on $(hostname -f). PID: $$, PPID: $PPID" logger
+    msg I "Command line: $0 $(printf '%q ' "${args[@]}")"
+
+    # Parse conf file
+    # ~~~~~~~~~~~~~~~
+    buf=$(ck_file "$conf_fn" f:r 2>&1)
+    if [[ $buf = '' ]]; then
+        conf_file_content=$(<"$conf_fn")
+        if [[ ! $conf_file_content =~ $absolute_path_regex ]]; then
+           msg_part="$conf_fn content is not an absolute path:"
+           msg E "$msg_part"$'\n'"$conf_file_content"
+        elif (($(cat "$conf_fn"|wc -l)!=1)); then
+           msg_part="$conf_fn content is not a single line:"
+           msg E "$msg_part"$'\n'"$conf_file_content"
+        fi
+    else
+        msg E "$buf"
+    fi
+    msg I "$conf_fn content:"$'\n'"$conf_file_content"
+
+    # Set traps
+    # ~~~~~~~~~
+    for ((i=1;i<${#sig_names[*]};i++))
+    do
+        ((i==9)) && continue     # SIGKILL
+        ((i==17)) && continue    # SIGCHLD
+        trap "finalise $((128+i))" ${sig_names[i]#SIG}
+    done
+
+    # Create and lock the PID file
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    do_pid "$(printf '%q ' "${args[@]}")"
+
+    fct "${FUNCNAME[0]}" 'returning'
+}  # end of function initialise
+
+#--------------------------
+# Name: msg
+# Purpose: generalised messaging interface
+# Arguments:
+#    $1 class:
+#       A agent
+#       D debug
+#       I information
+#       W warning
+#    $2 message text
+#    $3 logger control. Optional
+#       If "logger" then also send class I messages with logger (to syslog)
+#       If "no_logger" then do not also send class  W and E messages with
+#       logger (to syslog).
+# Global variables read:
+#     conf_name
+#     script_name
+# Output:
+#   * A messages to pre-redirected stdout
+#   * I messages to stdout
+#   * D, E and W messages to stderr
+#   * In case stderr is redirected other than to /dev/tty then D, E and W
+#     messages are also sent to pre-redirected stderr
+# Returns:
+#   Does not return (calls finalise) when class is E for error
+#   Otherwise returns 0
+#--------------------------
+function msg {
+    local buf class dated_message_text i logger_flag logger_msg message_text prefix
+    local -r regex='^(|(logger)|(no_logger))$'
+    local -r max_logger_chars=100000
+
+    # Process arguments
+    # ~~~~~~~~~~~~~~~~~
+    class="${1:-}"
+    message_text="${2:-}"
+    [[ ! ${3:-} =~ $regex ]] && msg E "Programming error: invalid ${FUNCNAME[0]} third argument '${3:-}' (does not match regex $regex)"
+
+    # Class-dependent set-up
+    # ~~~~~~~~~~~~~~~~~~~~~~
+    logger_flag=$false
+    case "$class" in
+        A )
+            prefix=
+            ;;
+        D )
+            [[ ! $debugging_flag ]] && return
+            prefix='DEBUG: '
+            [[ ${3:-} = logger ]] && logger_flag=$true
+            ;;
+        E )
+            error_flag=$true
+            prefix='ERROR: '
+            [[ ${3:-} != no_logger ]] && logger_flag=$true
+            ;;
+        I )
+            prefix=
+            [[ ${3:-} = logger ]] && logger_flag=$true
+            ;;
+        W )
+            warning_flag=$true
+            prefix='WARN: '
+            [[ ${3:-} != no_logger ]] && logger_flag=$true
+            ;;
+        * )
+            msg E "msg: invalid class '$class': '$*'"
+    esac
+
+    # Write to syslog
+    # ~~~~~~~~~~~~~~~
+    if [[ $logger_flag ]]; then
+        preamble=$script_name+$conf_name[$$]
+        logger_msg=("$prefix$message_text")
+        if ((${#logger_msg}>max_logger_chars)); then
+            unset logger_msg
+            logger_msg+=("${prefix}Message too big (>$max_logger_chars characters)")
+            logger_msg+=('The message is split into pieces:')
+            buf=$message_text
+            while ((${#buf}>0))
+            do
+                logger_msg+=("${buf:0:$max_logger_chars}")
+                buf=${buf:$max_logger_chars}
+            done
+        fi
+        for ((i=0;i<${#logger_msg[*]};i++))
+        do
+            buf=$(logger -t "$preamble" -- "${logger_msg[i]}" 2>&1)
+            [[ $buf != '' ]] && msg W "${FUNCNAME[0]}: problem writing to syslog: $buf"
+        done
+    fi
+
+    # Write to file descriptors
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~
+    # D, E, I and W normally to log
+    # A messages normally to caller
+    message_text=$prefix$message_text
+    dated_message_text="$(date "$log_date_format") $message_text"
+    if [[ $class = I ]]; then
+        echo "$dated_message_text"
+    elif [[ $class = A ]]; then
+        echo "$message_text" >&3
+    else
+        echo "$dated_message_text" >&2
+        if [[ $class = E ]]; then
+            [[ ! $finalising_flag ]] && finalise 1
+        fi
+    fi
+
+    return 0
+}  #  end of function msg
+
+#--------------------------
+# Name: usage
+# Purpose: prints usage message
+#--------------------------
+function usage {
+    fct "${FUNCNAME[0]}" 'started'
+    local msg usage
+
+    # Build the messages
+    # ~~~~~~~~~~~~~~~~~~
+    usage=usage:
+    usage+=$'\n'"    $script_name -D -c file [-d] [-h] [-l log|-L dir] [-t dir]"
+    usage+=$'\n    or'
+    usage+=$'\n'"    $script_name -b retention -c file [-d] [-h] [-l log|-L dir] [-t dir]"
+    msg='  where:'
+    msg+=$'\n    -b backup directory mode with retention days'
+    msg+=$'\n    -c configuration file'
+    msg+=$'\n    -D directory existence report mode'
+    msg+=$'\n    -d debugging on'
+    msg+=$'\n    -h prints this help and exits'
+    msg+=$'\n    -l log file.  Use /dev/tty to log to screen'
+    msg+=$'\n    -L log directory. Default:'
+    msg+=$'\n        When user is root:'"${BUNG_LOG_DIR:-}"
+    msg+=$'\n        Otherwise ~/var/log/bung'
+    msg+=$'\n    -t temporary directory. Default:'
+    msg+=$'\n        When user is root:'"${BUNG_TMP_DIR:-}"
+    msg+=$'\n        Otherwise ~/var/run/bung'
+
+    # Display the message(s)
+    # ~~~~~~~~~~~~~~~~~~~~~~
+    echo "$usage" >&2
+    if [[ ${1:-} != 'verbose' ]]; then
+        echo "(use -h for help)" >&2
+    else
+        echo "$msg" >&2
+    fi
+
+    fct "${FUNCNAME[0]}" 'returning'
+}  # end of function usage
+
+#--------------------------
+# Name: main
+# Purpose: where it all happens
+#--------------------------
+[[ ${BUNG_COMPGEN_DIR:-} != '' ]] && compgen -v >> $BUNG_COMPGEN_DIR/initial.vars
+initialise "${@:-}"
+[[ $backup_dir_mode_flag ]] && backup_dir
+[[ $dir_report_mode_flag ]] && dir_report
+finalise 0

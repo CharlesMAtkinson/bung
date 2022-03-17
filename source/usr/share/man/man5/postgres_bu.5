@@ -1,0 +1,107 @@
+.ig
+Copyright (C) 2021 Charles Atkinson
+
+Permission is granted to make and distribute verbatim copies of this
+manual provided the copyright notice and this permission notice are
+preserved on all copies.
+
+Permission is granted to copy and distribute modified versions of this
+manual under the conditions for verbatim copying, provided that the
+entire resulting derived work is distributed under the terms of a
+permission notice identical to this one.
+
+Permission is granted to copy and distribute translations of this
+manual into another language, under the above conditions for modified
+versions, except that this permission notice may be included in
+translations approved by the Free Software Foundation instead of in
+the original English.
+..
+.\" No adjustment (ragged right)
+.na\" No adjusting text
+.nh\" No hyphenation
+.TH postgres_bu 5 "17 Mar 2022" "Auroville" "Version 3.2.2"
+.SH NAME
+postgres_bu \- configuration for bung's pg_dump and pg_dumpall wrapper
+.SH SYNOPSIS
+.HP
+\fBEmail for report\fB\~=\~\fI...
+.HP
+\fBLog retention\fB\~=\~\fI...
+.HP
+\fBMount\fB\~=\~\fI...
+.HP
+\fBOrganisation name\fB\~=\~\fI...
+.HP
+\fBPostgreSQL\~= \fR[\fBdest_dir=\fIdir\fR] \fR[\fBdest_dir_usage_warning=\fI%\fR] \fR[\fBexclude=\fIdb1\fR,\fIdb2\fR\~...] \fR[\fBretention=\fIdays\fR] \fR[\fBtimestamp_format=\fIformat\fR]
+.HP
+\fBPre-hook\fB\~=\~\fI... 
+.HP
+\fBPost-hook\fB\~=\~\fI...
+.HP
+\fBShutdown\fB\~=\~\fI...
+.HP
+.SH DESCRIPTION
+This page describes the keywords specific to postgres_bu
+.P
+The \fBbung-common\fR (5) man page describes
+the configuration file format
+and the common keywords ellipsised in the \fBSYNOPSIS\fR above
+.SH OPTIONS (keywords)
+.TP
+PostgreSQL
+.RS
+.HP
+.nh
+\fBPostgreSQL\~=
+\fR[\fBdest_dir=\fIdir\fR]
+\fR[\fBdest_dir_usage_warning=\fI%\fR]
+\fR[\fBexclude=\fIdb1\fR,\fIdb2\fR\~...]
+\fR[\fBretention=\fIdays\fR]
+\fR[\fBtimestamp_format=\fIformat\fR]
+.P
+Required.
+May be used multiple times.
+.P
+\fBdest_dir\fR is the directory to write the pg_dump and pg_dumpall files to.
+.br
+The pg_dumpall --globals-only output is written in the directory.
+Each database's pg_dump output is written in a subdirectory with database's name.
+.br
+Default: /var/backup/postgres
+.P
+\fBdest_dir_usage_warning\fR is the % file system usage that will trigger a warning
+after the backup is finished.
+.br
+Use dest_dir_usage_warning=0 to disable.
+.br
+Default: 80
+.P
+\fBexclude\fR lists databases to exclude from the backup.
+.br
+Default: backup all databases except template0 and template1
+.P
+\fBretention\fR
+.br
+Default: 28 days backup retention
+.P
+\fBtimestamp_format\fR timestamp_format is the date command format used to
+generate timestamps for use in backup file names
+.br
+Default: %Y-%m-%d@%H:%M:%S
+.RE
+.
+.SH ENVIRONMENT
+Environment variables are described in bung-common (5).
+.SH FILES
+Default directories are described in bung-common (5).
+.SH EXAMPLES
+Example postgres_bu configuration files are
+normally installed in /usr/share/bung/doc/examples
+.SH AUTHOR
+Charles Atkinson bung@charlesmatkinson.org
+.SH SEE ALSO
+\fBbung-common\fR(5 and 8),
+\fBpostgres_bu\fR(8)
+.br
+The bung user guide,
+normally installed in /usr/share/bung/doc

@@ -1,0 +1,10 @@
+#!/bin/bash
+
+buf=$(
+    echo /usr/bin/super_bu -c all \
+        | at now +10 minutes 2>&1 \
+        | grep -v '^warning: commands will be executed using /bin/sh' \
+        | grep -Ev '^job [[:digit:]]+ at '
+)
+[[ $buf != '' ]] && echo "$buf" 
+exit 0

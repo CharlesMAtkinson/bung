@@ -1,0 +1,102 @@
+.ig
+Copyright (C) 2021 Charles Atkinson
+
+Permission is granted to make and distribute verbatim copies of this
+manual provided the copyright notice and this permission notice are
+preserved on all copies.
+
+Permission is granted to copy and distribute modified versions of this
+manual under the conditions for verbatim copying, provided that the
+entire resulting derived work is distributed under the terms of a
+permission notice identical to this one.
+
+Permission is granted to copy and distribute translations of this
+manual into another language, under the above conditions for modified
+versions, except that this permission notice may be included in
+translations approved by the Free Software Foundation instead of in
+the original English.
+..
+.\" No adjustment (ragged right)
+.na
+.TH rsync_restore 8 "17 Mar 2022" "Auroville" "Version 3.2.2"
+.SH NAME
+rsync_restore \- restore files from backups made by bung's rsync_bu
+.SH SYNOPSIS
+\fbrsync_restore \fR[\fB-b\~\fIbackup_subdir\fR] \fR[\fB-c\~\fIconf\fR] \fR[\fB-d\fR] \fR[\fB-h\fR] \fR[\fB-r\~\fIrestore_dir\fR] \fR[\fB-s\~\fIsubdir\fR] \fR[\fB-v\fR]
+.SH DESCRIPTION
+rsync_restore restores files from rsync_bu backups to the
+"point in time" of one of the backups.
+.SH OPTIONS
+.TP
+Common options
+.RS
+.nh
+The options not listed below are described in bung-common(5).
+.RE
+.
+.TP
+-b
+.RS
+.nh
+The most recent rsync backup subdirectory to be included in the restore.
+A YYYY/Mmm/dd@hh:mm subdirectory of the rsync backup directory is required.
+The default rsync backup directory is "_Changed and deleted files".
+.P
+rsync_restore does not do true "point in time" restores. 
+.P
+If the backups' source directory was a snapshot, files with modification times up to one minute after the nominal backup time are also restored.  This has to be done to ensure not missing files because the subdirectory name is rounded to the nearest minute.
+.P
+If the backups' source directory was a not a snapshot, files with modification times up to one hour after the nominal backup time are also restored.  This has to be done to -- crudely -- allow for the rsync running time.
+.P
+Default: choose one interactively
+.RE
+.
+.TP
+-c
+.RS
+.nh
+The rsync_bu configuration file that was used for the backups to restore
+from.
+If it does not contain a "/",
+it is relative to the bung configuration directory,
+normally /etc/bung.
+.P
+Only configuration files with a single rsync keyword are supported.
+.P
+Default: choose one interactively
+.RE
+.
+.TP
+-r
+.RS
+.nh
+The directory to restore to.
+.br
+Default: choose one interactively
+.RE
+.
+.TP
+-s
+.RS
+.nh
+The subdirectory of the backed up files to restore.
+For example, if the backup was of the / file system: /root.
+.br
+Default: choose one interactively
+.RE
+.
+.SH ENVIRONMENT
+Environment variables are described in bung-common (5).
+.SH FILES
+Default directories are described in bung-common (5).
+.SH EXAMPLES
+-
+.SH AUTHOR
+Charles Atkinson bung@charlesmatkinson.org
+.SH SEE ALSO
+\fBbung-common\fR(5\~and\~8),
+\fBrsync_bu\fR(5\~and\~8),
+\fBrsync_restore\fR(8),
+.br
+The bung user guide,
+normally installed in /usr/share/bung/doc

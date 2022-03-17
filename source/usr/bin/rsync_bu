@@ -1,0 +1,768 @@
+#! /bin/bash
+
+# Copyright (C) 2022 Charles Atkinson
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+
+# Purpose:
+#   Runs rsync as part of the Backup Next Generation (bung) suite
+
+# Usage:
+#   See usage.fun or use -h option.
+
+# Programmers' notes: bash library
+#   * May be changed by setting environment variable BUNG_LIB_DIR
+export BUNG_LIB_DIR=${BUNG_LIB_DIR:-/usr/lib/bung}
+source "$BUNG_LIB_DIR/version.scrippet" || exit 1
+
+# Programmers' notes: function call tree
+#    +
+#    |
+#    +-- initialise
+#    |   |
+#    |   +-- usage
+#    |   |
+#    |   +-- parse_conf
+#    |   |   |
+#    |   |   +-- parse_conf_rsync
+#    |   |   |
+#    |   |   +-- parse_conf_*
+#    |   |
+#    |   +-- err_trap_email_for_report
+#    |   |
+#    |   +-- postprocess_mount_conf
+#    |   |
+#    |   +-- err_trap_mount_conf
+#    |   |
+#    |   +-- postprocess_org_name_conf
+#    |   |
+#    |   +-- err_trap_post_hook_conf
+#    |   |
+#    |   +-- err_trap_pre_hook_conf
+#    |   |
+#    |   +-- postprocess_rsync_conf
+#    |   |
+#    |   +-- err_trap_rsync_conf
+#    |   |
+#    |   +-- err_trap_shutdown
+#    |   |
+#    |   +-- postprocess_snapshot_conf
+#    |   |
+#    |   +-- err_trap_snapshot_conf
+#    |   |
+#    |   +-- do_pid
+#    |
+#    +-- do_snapshots
+#    |
+#    +-- do_mounts
+#    |   |
+#    |   +-- get_fs_type
+#    |   |
+#    |   +-- do_mount_command
+#    |
+#    +-- err_trap_rsync_files_and_dirs
+#    |
+#    +-- run_pre_hooks
+#    |
+#    +-- backup
+#    |   |
+#    |   +-- ck_backup
+#    |   |
+#    |   +-- remove_old_backups
+#    |   |
+#    |   +-- report_dest_dir_usage
+#    |
+#    +-- finalise
+#
+# Utility functions called from various places:
+#     ck_file ck_uint do_umounts err_trap_uint fct msg parse_conf_subkey_value
+
+# Function definitions in alphabetical order.  Execution begins after the last function definition.
+
+#--------------------------
+# Name: backup
+# Purpose: runs rsync
+# Arguments: none
+# Return code: always 0
+#--------------------------
+function backup {
+    fct "${FUNCNAME[0]}" 'started'
+    local array buf cmd hour_min_separator i msg_class msg_part
+    local OK_to_continue rc remote_out saved_IFS
+    local usage_warning
+    local rsync_cmd rsync_cmd_ran_OK_flag rsync_cmd_for_log
+    local rsync_cmd_for_log_part rsync_out
+    local rsync_rc try_rsync_again_flag rsync_version
+    local backup_dir_absolute backup_dir backup_dir_exists_flag
+    local backup_subdir_date_fmt backup_subdir_regex
+    local dest_dir_escaped dest_dir_remote_host
+    local src_dir_remote_host
+    local remote_conf_fn remote_host run_remote_agent_args
+    local -r tmp_fn=$tmp_dir/backup
+    local -r usage_percent_regex='^[[:digit:]]+%$'
+    local -r no_such_regex='No such file or directory'
+    local -r bad_configuration_option_re='Bad configuration option'
+
+    # Initialise convenience variables
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    if [[ $src_dir_remote_flag ]]; then
+        src_dir_remote_host=${src_dir%%:*}
+        src_dir_remote_dir=${src_dir#*:}
+    fi
+    if [[ $dest_dir_remote_flag ]]; then
+        dest_dir_remote_host=${dest_dir%%:*}
+        dest_dir_remote_dir=${dest_dir#*:}
+    fi
+
+    # Create any missing destination directory (local only)
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    if [[ ! $dest_dir_remote_flag && ! -d "$dest_dir" ]]; then
+        msg W "Destination directory $dest_dir does not exist; making it"
+        cmd=(mkdir -p "$dest_dir")
+        buf=$("${cmd[@]}" 2>&1)
+        rc=$?
+        if ((rc!=0)) || [[ $buf != '' ]]; then
+            msg E "${cmd[*]}: rc: $rc, output $buf"
+        fi
+    fi
+
+    # Prepare to run rsync.  Was options= configured?
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    if [[ $rsync_options = '' ]]; then    # No options=
+
+        # Is retention required?
+        # ~~~~~~~~~~~~~~~~~~~~~~
+        ((backup_retention!=0)) \
+            && retention_flag=$true || retention_flag=$false
+
+        # Does the rsync --backup directory exist?
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # Required to protect it if zero retention is configured
+        msg I 'Finding if the rsync --backup directory exists'
+        backup_dir_exists_flag=$false
+        if [[ $dest_dir_remote_flag ]]; then
+
+            #   Syntax
+            #       run_remote_agent -b|-D -c conf [-l dir] [-p dir] -s ssh_host [-t timeouts] [-T count]
+            #   Where
+            #       -b and -D are options for remote_agent
+            #       -c configuration string for remote agent
+            #       -l remote host log directory
+            #       -p remote host PID directory
+            #       -s ssh host (normally in ~/.ssh/config)
+            #       -t <timeout>[,timeout>]
+            #          Duration before timing out:
+            #          1 The command
+            #          2 Any remote host connection test
+            #          <timeout> must be a floating point number with an optional suffix:
+            #          s for seconds (the default)
+            #          m for minutes
+            #          h for hours
+            #          d for days  
+            #          Default 10,10
+            #       -T timeout retry count.  Default 0
+            backup_dir_absolute=$dest_dir_remote_dir/$rsync_backup_dir
+            run_remote_agent_args=(-c "$backup_dir_absolute" -D)
+            [[ $remote_host_log_dir != '' ]] \
+                && run_remote_agent_args+=(-l "$remote_host_log_dir")
+            [[ $remote_host_pid_dir != '' ]] \
+                && run_remote_agent_args+=(-p "$remote_host_pid_dir")
+            # 60 is based on worst case experience
+            run_remote_agent_args+=(
+               -s "$dest_dir_remote_host" \
+               -t "$remote_host_timeout",60 \
+               -T "$retry_max"
+            )
+            run_remote_agent "${run_remote_agent_args[@]}"
+            rc=$?
+            ((rc!=0)) && msg E 'rsync --backup directory status not found'
+            [[ $(<"$tmp_dir"/out) = Exists ]] && backup_dir_exists_flag=$true
+        else
+            backup_dir_absolute=$dest_dir/$rsync_backup_dir
+            [[ -d "$backup_dir_absolute" ]] && backup_dir_exists_flag=$true
+        fi
+        [[ $backup_dir_exists_flag ]] \
+            && msg_part=exists || msg_part='does not exist'
+        msg I "The rsync --backup directory '$backup_dir_absolute' $msg_part"
+
+        # Build the rsync command
+        # ~~~~~~~~~~~~~~~~~~~~~~~
+        # * Options are added in alphabetical order except filter rules
+        #   options are added first because "the first matching pattern is
+        #   acted on" so order is important
+        # * The --archive option is not used because it cannot be used when
+        #   the destination directory is on Windows file system so the several
+        #   options implied by --archive are specified individually
+        rsync_cmd=(rsync)
+
+        # Filter rules options
+        rsync_cmd+=("--filter=protect $rsync_backup_dir/")
+        if [[ $retention_flag ]]; then
+            rsync_cmd+=("--exclude=/${rsync_backup_dir}/")
+        else
+           if [[ $backup_dir_exists_flag ]]; then
+               # A backup directory exists on the destination directory
+               if [[ ! $backup_retention_0_nowarn_flag ]]; then
+                   buf=$rsync_backup_dir
+                   msg W "Directory '$buf' exists but 'retention=0' is configured.  It will not be removed"
+                   rsync_cmd+=("--exclude=/$rsync_backup_dir/")
+               fi
+           fi
+        fi
+        [[ $rsync_exclude_fn != '' ]] \
+            && rsync_cmd+=("--exclude-from=$rsync_exclude_fn")
+
+        # Other options
+        if [[ $retention_flag ]]; then
+            [[ $dest_dir_windows_flag ]] \
+                && hour_min_separator=h || hour_min_separator=':'
+            backup_subdir_date_fmt="%Y/%b/%d@%H$hour_min_separator%M"
+            backup_subdir_regex='./20[[:digit:]]{2}/[[:alpha:]]{3}/[[:digit:]]{2}'
+            backup_subdir_regex+="@[[:digit:]]{2}$hour_min_separator[[:digit:]]{2}"
+            rsync_cmd+=(--backup \
+               "--backup-dir=$rsync_backup_dir/$(date "+$backup_subdir_date_fmt")"
+            )
+        fi
+        [[ $rsync_bwlimit != '' ]] \
+            && rsync_cmd+=(--bwlimit=$rsync_bwlimit)
+        [[ ! $rsync_nocompression_flag ]] \
+            && [[ $src_dir_remote_flag || $dest_dir_remote_flag ]] \
+            && rsync_cmd+=(--compress)
+        rsync_cmd+=(--delete-during --delete-excluded)
+        [[ ! $dest_dir_windows_flag ]] \
+            && rsync_cmd+=(--devices)
+        [[ $rsync_dry_run_flag ]] && rsync_cmd+=(--dry-run)
+        [[ ! $dest_dir_windows_flag ]] \
+            && rsync_cmd+=(--group)
+        rsync_cmd+=(--links)
+        [[ $dest_dir_windows_flag ]] \
+            && rsync_cmd+=(--modify-window=1)
+        [[ ! $dest_dir_windows_flag ]] \
+            && rsync_cmd+=(--owner)
+        [[ ! $rsync_no_numeric_ids_flag ]] \
+            && rsync_cmd+=(--numeric-ids)
+        [[ ! $dest_dir_windows_flag ]] \
+            && rsync_cmd+=(--perms)
+        rsync_cmd+=(--timeout=${rsync_timeout})
+        [[ $src_dir_remote_flag || $dest_dir_remote_flag ]] \
+            && rsync_cmd+=(--protect-args)
+        rsync_cmd+=(--recursive)
+        buf=(ssh -o StrictHostKeyChecking=accept-new)
+        [[ ! $buf =~ $bad_configuration_option_re ]] && rsync_cmd+=(--rsh 'ssh -o StrictHostKeyChecking=accept-new')
+        [[ ! $dest_dir_windows_flag ]] \
+            && rsync_cmd+=(--specials)
+        rsync_cmd+=(--times)
+        for ((j=0;j<${rsync_verbose_level};j++))
+        do
+            rsync_cmd+=(--verbose)
+        done
+        # Can not use convenience variables here; need any "hostname:" prefix
+        rsync_cmd+=(
+            "$src_dir"
+            "$dest_dir"
+        )
+    else
+        # options= was configured
+        # ~~~~~~~~~~~~~~~~~~~~~~~
+        rsync_cmd=(
+            rsync
+            $rsync_options
+            "$src_dir"
+            "$dest_dir"
+        )
+    fi
+
+    # Run the rsync command
+    # ~~~~~~~~~~~~~~~~~~~~~
+    for buf in "${rsync_cmd[@]}"
+    do
+        printf -v rsync_cmd_for_log_part %q "$buf"
+        rsync_command_for_log+="$rsync_cmd_for_log_part "
+    done
+    rsync_command_for_log=${rsync_command_for_log% }
+    for ((i=-1;i<$retry_max;i++))
+    do
+        msg_part="Running rsync command"
+        msg_part+=" (attempt $((i+2)) of $((${retry_max}+1)))"
+        msg I "$msg_part: $rsync_command_for_log"
+        rsync_out=$("${rsync_cmd[@]}" 2>&1)
+        rsync_rc=$?
+        msg I "rsync return code: $rsync_rc"
+        ck_backup
+        [[ $rsync_cmd_ran_OK_flag ]] && break
+        [[ ! $try_rsync_again_flag ]] && break
+    done
+    [[ ! $rsync_cmd_ran_OK_flag ]] && msg E 'rsync did not run OK (detail above)'
+
+    remove_old_backups
+    report_dest_dir_usage
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function backup
+
+#--------------------------
+# Name: ck_backup
+# Purpose: check the output from the rsync command; decide if it was OK
+# Arguments: none
+# Global variable usage:
+#   rsync_cmd_ran_OK_flag: set
+#   try_rsync_again_flag: set
+#   rsync_out: read
+#   rsync_rc: read and set
+# Return code: always 0
+#--------------------------
+function ck_backup {
+    fct "${FUNCNAME[0]}" 'started'
+    local array buf buf2 msg_class msg_part rsync_version oIFS
+    local -r total_size_0_regex='total size is 0'
+    local -r try_rsync_again_regex='(No route to host|connection unexpectedly closed)'
+
+    # Analyse and log rsync output
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    try_rsync_again_flag=$false
+    rsync_cmd_ran_OK_flag=$false
+    case $rsync_rc in
+        0 | 24 )
+            rsync_cmd_ran_OK_flag=$true
+            [[ $rsync_out =~ $total_size_0_regex ]] \
+                && msg W "No data transferred by rsync.  Was source directory '$src_dir' empty?"
+            ;;
+        23 )
+            read _ _ rsync_version _ < <(rsync --version)
+            oIFS=$IFS
+            IFS=. array=($rsync_version)
+            IFS=$oIFS
+
+            if ((${array[0]}==3)) && ((${array[1]}<1)); then
+
+                # rsync version earlier than 3.1.0
+                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                # rsync before version 3.1.0 intermittently and rarely generated
+                # these messages (not always adjacent) and set return code 23:
+                #     rsync: make_bak_dir mkdir <path> failed: File exists (17)
+                #     rsync: keep_backup failed: <path> -> <path>: No such file or directory (2)
+                #     rsync: stat <path> failed: No such file or directory (2)
+                # No solution was found so there was no benefit in logging a
+                # warning or error.
+
+                # Remove any spurious errror messages and associated summary
+                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                buf=$(
+                    echo "$rsync_out" | \
+                        sed \
+                            -e '/^rsync: keep_backup failed: .* -> .*: No such file or directory (2)/d' \
+                            -e '/^rsync: link .* -> .*: No such file or directory (2)/d' \
+                            -e '/^rsync: make_bak_dir mkdir .* failed: File exists (17)/d' \
+                            -e '/^rsync: stat .* failed: No such file or directory (2)/d' \
+                            -e '/^rsync error: some files\/attrs were not transferred/d'
+                )
+
+                # Look for other messages that generate return code 23
+                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                # The messages were identified by operational experience
+                # after source code inspection was not successful.
+                # In case the source code is to be inspected again, it was
+                # downloaded from https://rsync.samba.org/ftp/rsync/src/
+                # and searched for RERR_PARTIAL, the defined constant for
+                # return code 23.
+                buf=$(
+                    echo "$buf" | \
+                        sed -n \
+                            -e '/^IO error encountered/p' \
+                            -e '/^cannot delete non-empty directory:/p' \
+                            -e '/^rsync error:/p' \
+                            -e '/^rsync: /p'
+                )
+                if [[ $buf = '' ]]; then
+                    # Only spurious error messages
+                    rsync_rc='23 but the "errors" are a known bug'
+                else
+                    # Significant error messages
+                    buf=$(
+                        echo "$buf" | \
+                            sed '/^cannot delete non-empty directory:/d'
+                    )
+                    if [[ $buf = '' ]]; then
+                        rsync_cmd_ran_OK_flag=$true
+                        msg_part='rsync was unable to delete at least one'
+                        msg W "$msg_part non-empty directory"
+                    fi
+                fi
+
+            else
+                # rsync version later than 3.1.0
+                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                buf=$(
+                    echo "$rsync_out" | \
+                        sed -n \
+                            -e '/^IO error encountered/p' \
+                            -e '/^rsync error:/p' \
+                            -e '/^rsync: /p'
+                )
+                if [[ $buf != '' ]]; then
+                    msg_part='rsync return code 23'
+                    msg_part+=$'\nrsync errors:'
+                    msg_part+=$'\n'"$buf"
+                    msg E "$msg_part"$'\nOutput:\n'"$rsync_out"
+                fi
+                buf=$(
+                    echo "$rsync_out" | \
+                        sed -n '/^cannot delete non-empty directory:/p'
+                )
+                if [[ $buf != '' ]]; then
+                    rsync_cmd_ran_OK_flag=$true
+                    msg_part='rsync was unable to delete at least one'
+                    msg W "$msg_part non-empty directory"
+                else
+                    msg_part="Programming error: ${FUNCNAME[0]}:"
+                    msg_part+=' rsync return code 23'
+                    msg_part+=' but error not found in rsync output'
+                    msg E "$msg_part"$'\nrsync output:\n'"$rsync_out"
+                fi
+            fi
+            ;;
+        30 | 35 )
+            try_rsync_again_flag=$true
+            ;;
+        127 )
+            msg E 'rsync: command not found'
+            ;;
+        * )
+            [[ $rsync_out =~ $try_rsync_again_regex ]] \
+                && try_rsync_again_flag=$true
+    esac
+    msg I "rsync return code $rsync_rc. Output:"$'\n'"$rsync_out"
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function ck_backup
+
+source "$BUNG_LIB_DIR/ck_file.fun" || exit 1
+source "$BUNG_LIB_DIR/ck_uint.fun" || exit 1
+source "$BUNG_LIB_DIR/do_mounts.fun" || exit 1
+source "$BUNG_LIB_DIR/do_limits.fun" || exit 1
+source "$BUNG_LIB_DIR/do_pid.fun" || exit 1
+source "$BUNG_LIB_DIR/do_snapshots.fun" || exit 1
+source "$BUNG_LIB_DIR/do_umounts.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_email_for_report.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_mount_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_post_hook_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_pre_hook_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_rsync_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_rsync_files_and_dirs.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_shutdown.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_snapshot_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_uint.fun" || exit 1
+source "$BUNG_LIB_DIR/fct.fun" || exit 1
+source "$BUNG_LIB_DIR/finalise.fun" || exit 1
+source "$BUNG_LIB_DIR/get_fs_type.fun" || exit 1
+
+#--------------------------
+# Name: initialise
+# Purpose: sets up environment and parses command line
+#--------------------------
+function initialise {
+
+    # Declare common locals
+    # Configure shell environment
+    # Initialise common envars, globals and locals
+    # Parse command line
+    # Check the config file
+    # Check the PID directory
+    # Set up logging
+    # Set traps
+    # Create and lock the PID file
+    # Create temporary directory
+    source "$BUNG_LIB_DIR/initialise_1.scrippet" || exit 1
+
+    # Set globals only used by this bung script
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    rsync_dry_run_flag=$false
+    ssh_connection_count=0
+
+    # Parse configuration file
+    # ~~~~~~~~~~~~~~~~~~~~~~~~
+    emsg=
+    # Note: ensure a space on both sides of each string in the arrays
+    local -A keyword_validation
+    keyword_validation[name]=' 
+        emailforreport 
+        logretention 
+        maxmemorysize 
+        mount 
+        numberofopenfiles 
+        organisationname 
+        post_hook 
+        pre_hook 
+        rsync 
+        shutdown 
+        snapshot 
+    '
+    keyword_validation[repeat invalid]=' 
+        logretention 
+        maxmemorysize 
+        numberofopenfiles 
+        organisationname 
+        rsync 
+        shutdown 
+    '
+    local +r keyword_validation
+    parse_conf "$conf_fn"
+    [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
+
+    # Postprocess and error trap the configuration
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    # Email for report
+    if [[ ! $subsidiary_mode_flag ]]; then
+        postprocess_email_for_report && err_trap_email_for_report
+    fi
+
+    # Limits
+    if [[ ! ${max_memory_size:-} =~ $limits_OK_regex ]]; then
+        emsg+=$msg_lf"Invalid max memory size $max_memory_size"
+        emsg+=" (does not match $limits_OK_regex)"
+    fi
+    if [[ ! ${n_open_files:-} =~ $limits_OK_regex ]]; then
+        emsg+=$msg_lf"Invalid number of open files $n_open_files"
+        emsg+=" (does not match $limits_OK_regex)"
+    fi
+
+    # Log retention
+    err_trap_uint "$log_retention" "Invalid log retention value"
+
+    # Mount
+    postprocess_mount_conf && err_trap_mount_conf
+
+    # Organisation name
+    postprocess_org_name_conf "${org_name:-}" "${org_name_optarg:-}" "$opt_o_flag"
+
+    # Post-hook
+    err_trap_post_hook_conf
+
+    # Pre-hook
+    err_trap_pre_hook_conf
+
+    # rsync
+    postprocess_rsync_conf
+    err_trap_rsync_conf
+
+    # Shutdown
+    err_trap_shutdown
+
+    # Snapshot
+    postprocess_snapshot_conf && err_trap_snapshot_conf
+
+    [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
+
+    # Finish if -C option (check the configuration)
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [[ $conf_check_flag ]] \
+        && { msg I "Configuration check OK for $conf_fn"; finalise 0; }
+
+    # Create and lock the PID file
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    do_pid "$(printf '%q ' "${args[@]}")"
+
+    # Convert any --exclude_from value relative path
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [[ $rsync_exclude_fn != '' && ! $rsync_exclude_fn =~ $absolute_path_re ]] \
+        && rsync_exclude_fn=$conf_dir/$rsync_exclude_fn
+
+    # Log limits (memory, open files) or set if configured
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    do_limits
+
+    fct "${FUNCNAME[0]}" 'returning'
+}  # end of function initialise
+
+source "$BUNG_LIB_DIR/msg.fun" || exit 1
+source "$BUNG_LIB_DIR/my_cat.fun" || exit 1
+source "$BUNG_LIB_DIR/parse_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/parse_conf_rsync.fun" || exit 1
+source "$BUNG_LIB_DIR/parse_conf_word.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_email_for_report.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_mount_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_org_name_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_rsync_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_snapshot_conf.fun" || exit 1
+
+#--------------------------
+# Name: remove_old_backups
+# Purpose: checked the output from the rsync command; decides if it was OK
+# Arguments: none
+# Global variable usage:
+#   backup_dir_absolute: read
+#   backup_retention: read
+#   backup_subdir_regex: read
+#   dest_dir_remote_flag: read
+#   dest_dir_remote_host: read
+#   i (function backup's rsync_idx loop variable): read
+#   rsync_backup_dir: read
+#   rsync_cmd_ran_OK_flag: set
+#   rsync_out: read
+#   rsync_rc: read and set
+# Return code: always 0
+#--------------------------
+function remove_old_backups {
+    fct "${FUNCNAME[0]}" 'started'
+    local buf j
+    local find_old_cmd find_empty_cmd
+    local msg_part OK_to_continue old_PWD out
+    local remote_out remote_conf_fn run_remote_agent_args
+    local -r tmp_fn=$tmp_dir/${FUNCNAME[0]}
+
+    # Nothing to do?
+    # ~~~~~~~~~~~~~~
+    if [[ $rsync_options = '' ]]; then
+        if [[ ! $backup_dir_exists_flag ]]; then
+            msg_part='rsync backup directory does not exist'
+            msg I "$msg_part; no old backups to remove"
+            fct "${FUNCNAME[0]}" 'returning 0'
+            return 0
+        fi
+        if ((backup_retention==0)); then
+            msg_part='retention 0 configured'
+            msg I "$msg_part; no old backups to remove"
+            fct "${FUNCNAME[0]}" 'returning 0'
+            return 0
+        fi
+    else
+        msg_part="Old backups removal not under this script's control"
+        msg I "$msg_part when sub-keyword options is used"
+        fct "${FUNCNAME[0]}" 'returning 0'
+        return 0
+    fi
+
+    msg I 'Removing backups older than the retention time'
+
+    # Remote or local?
+    # ~~~~~~~~~~~~~~~
+    if [[ $dest_dir_remote_flag ]]; then
+        msg I "Removing old and empty directories under '$rsync_backup_dir}'"
+        #   Syntax
+        #       run_remote_agent -b|-D -c conf [-l dir] [-p dir] -s ssh_host [-t timeouts] [-T count]
+        #   Where
+        #       -b and -D are options for remote_agent
+        #       -c configuration string for remote agent
+        #       -l remote host log directory
+        #       -p remote host PID directory
+        #       -s remote ssh host name (normally in ~/.ssh/config)
+        #       -t <timeout>[,timeout>]
+        #          Duration before timing out:
+        #          1 The command
+        #          2 Any remote host connection test
+        #          <timeout> must be a floating point number with an optional suffix:
+        #          s for seconds (the default)
+        #          m for minutes
+        #          h for hours
+        #          d for days  
+        #          Default 10,10
+        #       -T timeout retry count.  Default 0
+        backup_dir_absolute=$dest_dir_remote_dir/$rsync_backup_dir
+        run_remote_agent_args=(
+            -c "$backup_dir_absolute" -b "$backup_retention" 
+        )
+        [[ $remote_host_log_dir != '' ]] \
+            && run_remote_agent_args+=(-l "$remote_host_log_dir")
+        [[ $remote_host_pid_dir != '' ]] \
+            && run_remote_agent_args+=(-p "$remote_host_pid_dir")
+        # 10m is based on worst case experience
+        run_remote_agent_args+=(
+            -s "$dest_dir_remote_host" -t "10m,$remote_host_timeout"
+            -T "$retry_max"
+        )
+        run_remote_agent "${run_remote_agent_args[@]}"
+        rc=$?
+        out=$(<"$out_fn")
+        case $rc in
+            0)
+                [[ $out != '' ]] \
+                    && msg W "Unexpected output from remote agent: $out"
+                ;;
+            1)
+                msg W "Remote agent failed. rc: $rc, output: $out"
+                ;;
+            2)
+                msg W "Timed out running remote agent"
+        esac
+    else
+        msg I "Removing old directories under '$rsync_backup_dir'"
+        # The backup directory's parent path may not match itself when
+        # used as a regex; avoid the problem by cd to the backup directory
+        old_PWD=$PWD
+        cd "$backup_dir_absolute" || msg E "Unable to cd to '$backup_dir_absolute'"
+
+        # Build and run the find command for old directories
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        find_old_cmd=(
+            find
+            .
+            -maxdepth 3
+            -regextype posix-egrep
+            -mtime +$((backup_retention-1))
+            -regex "$backup_subdir_regex"
+            -type d
+            -exec rm -fr {} ';'
+        )
+        msg D "${FUNCNAME[0]}: find_old_cmd: ${find_old_cmd[*]}"
+        buf=$("${find_old_cmd[@]}" 2>&1)
+        if [[ $buf = '' ]]; then
+            msg I "Removing empty directories under '$rsync_backup_dir'"
+
+            # Build and run the find command for empty directories
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            find_empty_cmd=(
+                find
+                .
+                -depth -mindepth 1 -type d -empty -delete
+            )
+            msg D "${FUNCNAME[0]}: find_empty_cmd: ${find_empty_cmd[*]}"
+            buf=$("${find_empty_cmd[@]}" 2>&1)
+            if [[ $buf != '' ]]; then
+                msg_part='Unexpected output from find while'
+                msg_part+=' removing empty directories under'
+                msg W "$msg_part '$backup_dir_absolute': $buf"
+            fi
+        else
+            msg_part='Unexpected output from find while'
+            msg_part+=' removing old directories under'
+            msg W "$msg_part '$backup_dir_absolute': $buf"
+        fi
+        cd "$old_PWD" || msg E "Unable to cd to '$old_PWD'"
+    fi
+
+    fct "${FUNCNAME[0]}" 'returning'
+}  # end of function remove_old_backups
+
+source "$BUNG_LIB_DIR/report_dest_dir_usage.fun" || exit 1
+source "$BUNG_LIB_DIR/run_cmd_with_timeout.fun" || exit 1
+source "$BUNG_LIB_DIR/run_pre_hooks.fun" || exit 1
+source "$BUNG_LIB_DIR/run_remote_agent.fun" || exit 1
+source "$BUNG_LIB_DIR/usage.fun" || exit 1
+
+#--------------------------
+# Name: main
+# Purpose: where it all happens
+#--------------------------
+[[ ${BUNG_COMPGEN_DIR:-} != '' ]] && compgen -v >> $BUNG_COMPGEN_DIR/initial.vars
+initialise "${@:-}"
+do_snapshots
+do_mounts
+err_trap_rsync_files_and_dirs
+((pre_hook_idx>-1)) && run_pre_hooks
+backup
+finalise 0

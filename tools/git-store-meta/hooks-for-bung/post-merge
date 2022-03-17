@@ -1,0 +1,13 @@
+#!/bin/sh
+# when running the hook, cwd is the top level of working tree
+
+cd "$(git rev-parse --show-toplevel)"
+script=tools/git-store-meta/git-store-meta.pl
+[ ! -x "$script" ] && script='git-store-meta.pl'
+
+is_squash=$1
+
+# apply metadata after a successful non-squash merge
+if [ $is_squash -eq 0 ]; then
+    "$script" --apply
+fi

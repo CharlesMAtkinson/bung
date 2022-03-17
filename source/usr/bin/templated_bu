@@ -1,0 +1,823 @@
+#! /bin/bash
+
+# Copyright (C) 2021 Charles Atkinson
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+
+# Purpose:
+#   * Runs commands from a template file
+#   * If run with subkeyword git_root, adds, commits and pushes files to git
+
+# Usage:
+#   See usage.fun or use -h option.
+
+# Programmers' notes: bash library
+#   * May be changed by setting environment variable BUNG_LIB_DIR
+export BUNG_LIB_DIR=${BUNG_LIB_DIR:-/usr/lib/bung}
+source "$BUNG_LIB_DIR/version.scrippet" || exit 1
+
+# Programmers' notes: function call tree
+#    +
+#    |
+#    +-- initialise
+#    |   |
+#    |   +-- usage
+#    |   |
+#    |   +-- parse_conf
+#    |   |   |
+#    |   |   +-- parse_conf_templated
+#    |   |   |
+#    |   |   +-- parse_conf_*
+#    |   |
+#    |   +-- err_trap_email_for_report
+#    |   |
+#    |   +-- postprocess_mount_conf
+#    |   |
+#    |   +-- err_trap_mount_conf
+#    |   |
+#    |   +-- err_trap_post_hook_conf
+#    |   |
+#    |   +-- err_trap_pre_hook_conf
+#    |   |
+#    |   +-- postprocess_org_name_conf
+#    |   |
+#    |   +-- postprocess_templated_conf
+#    |   |
+#    |   +-- err_trap_templated_conf
+#    |   |
+#    |   +-- err_trap_shutdown
+#    |   |
+#    |   +-- postprocess_snapshot_conf
+#    |   |
+#    |   +-- err_trap_snapshot_conf
+#    |   |
+#    |   +-- do_pid
+#    |
+#    +-- do_snapshots
+#    |
+#    +-- do_mounts
+#    |   |
+#    |   +-- get_fs_type
+#    |   |
+#    |   +-- do_mount_command
+#    |
+#    +-- run_template
+#    |   |
+#    |   +-- parse_line_data
+#    |   |
+#    |   +-- substitute_tokens
+#    |   |
+#    |   +-- run_command
+#    |       |
+#    |       +-- run_command_with_timeout
+#    |
+#    +-- do_git
+#    |
+#    +-- remove_old_backups
+#    |
+#    +-- report_dest_dir_usage
+#    |
+#    +-- finalise
+#
+# Utility functions called from various places:
+#     ck_file ck_uint do_umounts err_trap_uint fct msg
+#     parse_conf_subkey_value parse_conf_word
+
+# Function definitions in alphabetical order.  Execution begins after the last function definition.
+
+source "$BUNG_LIB_DIR/ck_file.fun" || exit 1
+source "$BUNG_LIB_DIR/ck_uint.fun" || exit 1
+
+#--------------------------
+# Name: do_git
+# Purpose:
+#   Parses a template file assignment statement
+# Arguments: none
+# Global variable usage:
+#   Read: git_root_dir
+#   Set:
+# Output: none except via function fct
+# Return value: always 0; exits on error
+#--------------------------
+function do_git {
+    fct "${FUNCNAME[0]}" started
+    local buf cmd dir msg_part rc
+    local -r git_pull_OK_regex='^Already up.to.date\.$'
+    local -r git_add_OK_regex='^$'
+    local -r git_status_for_commit_regex='(changes not staged for commit|Changes to be committed)'
+    local -r git_status_nothing_to_commit_regex='nothing to commit'
+
+    # cd to git tree root
+    # ~~~~~~~~~~~~~~~~~~~
+    dir=$(readlink --canonicalize-missing -- "$git_root_dir" 2>&1)
+    [[ $dir != $git_root_dir ]] \
+        && msg I "$git_root_dir: after resolving symlinks: $dir"
+    cd "$dir" || finalise 1
+    msg I "In $dir directory"
+
+    # git pull
+    # ~~~~~~~~
+    cmd=(git pull)
+    msg I "Ensuring git is up to date by: ${cmd[*]}"
+    buf=$("${cmd[@]}" 2>&1)
+    rc=$?
+    if [[ ! $buf =~ $git_pull_OK_regex ]]; then
+        msg_part="Command ${cmd[*]}:"
+        msg_part+=$msg_lf"rc: $rc"
+        msg_part+=$msg_lf$'output:\n'"$buf"
+        msg E "$msg_part$msg_lf(output does not match $git_pull_OK_regex)"
+    fi
+
+    # git add
+    # ~~~~~~~
+    cmd=(git add --all)
+    msg I "Adding any new files by: ${cmd[*]}"
+    buf=$("${cmd[@]}" 2>&1)
+    rc=$?
+    if [[ ! $buf =~ $git_add_OK_regex ]]; then
+        msg_part="Command ${cmd[*]}:"
+        msg_part+=$msg_lf"rc: $rc"
+        msg_part+=$msg_lf$'output:\n'"$buf"
+        msg E "$msg_part$msg_lf(does not match $git_pull_OK_regex)"
+    fi
+
+    # git status
+    # ~~~~~~~~~~
+    cmd=(git status)
+    msg I "Finding if anything to commit by: ${cmd[*]}"
+    buf=$("${cmd[@]}" 2>&1)
+    rc=$?
+    if [[ $buf =~ $git_status_nothing_to_commit_regex ]]; then
+        msg I 'Nothing to commit'
+        fct "${FUNCNAME[0]}" returning
+        return
+    elif [[ $buf =~ $git_status_for_commit_regex ]]; then
+        msg I 'Commit required'
+    else
+        msg_part="Command ${cmd[*]}:"
+        msg_part+=$msg_lf"rc: $rc"
+        msg_part+=$msg_lf$'output:\n'"$buf"
+        msg_part+="$msg_lf(output does not match $git_status_nothing_to_commit_regex"
+        msg E "$msg_part or $git_status_for_commit_regex)"
+    fi
+
+    # git commit
+    # ~~~~~~~~~~
+    cmd=(git commit --message $script_name)
+    msg I "Committing changes by: ${cmd[*]}"
+    buf=$("${cmd[@]}" 2>&1)
+    rc=$?
+    if ((rc!=0)); then
+        msg_part="Command ${cmd[*]}:"
+        msg_part+=$msg_lf"rc: $rc"
+        msg E "$msg_lf"$'output:\n'"$buf"
+    fi
+    msg I "git commit output: $buf"
+
+    # git push
+    # ~~~~~~~~
+    cmd=(git push)
+    msg I "Pushing changes by: ${cmd[*]}"
+    buf=$("${cmd[@]}" 2>&1)
+    rc=$?
+    if ((rc!=0)); then
+        msg_part="Command ${cmd[*]}:"
+        msg_part+=$msg_lf"rc: $rc"
+        msg E "$msg_lf"$'output:\n'"$buf"
+    fi
+    msg I $'git push output:\n'"$buf"
+
+    fct "${FUNCNAME[0]}" returning
+    return 0
+}  # end of function do_git
+
+source "$BUNG_LIB_DIR/do_limits.fun" || exit 1
+source "$BUNG_LIB_DIR/do_mounts.fun" || exit 1
+source "$BUNG_LIB_DIR/do_pid.fun" || exit 1
+source "$BUNG_LIB_DIR/do_snapshots.fun" || exit 1
+source "$BUNG_LIB_DIR/do_umounts.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_email_for_report.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_mount_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_post_hook_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_pre_hook_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_templated_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_shutdown.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_snapshot_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_uint.fun" || exit 1
+source "$BUNG_LIB_DIR/fct.fun" || exit 1
+source "$BUNG_LIB_DIR/finalise.fun" || exit 1
+source "$BUNG_LIB_DIR/get_fs_type.fun" || exit 1
+
+#--------------------------
+# Name: initialise
+# Purpose: sets up environment and parses command line
+#--------------------------
+function initialise {
+
+    # Declare locals
+    # Configure shell environment
+    # Initialise envars, globals and locals common to all bung scripts
+    # Parse command line
+    # Check the config file
+    # Check the PID directory
+    # Set up logging
+    # Set traps
+    # Create and lock the PID file
+    # Create temporary directory
+    source "$BUNG_LIB_DIR/initialise_1.scrippet" || exit 1
+
+    # Set globals only used by this bung script
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    # Parse configuration file
+    # ~~~~~~~~~~~~~~~~~~~~~~~~
+    emsg=
+    # Note: ensure a space on both sides of each string in the arrays
+    local -A keyword_validation
+    keyword_validation[name]='
+        emailforreport 
+        logretention 
+        mount 
+        organisationname 
+        post_hook 
+        pre_hook 
+        shutdown 
+        snapshot 
+        templated 
+    '
+    keyword_validation[repeat invalid]='
+        logretention 
+        organisationname 
+        post_hook 
+        pre_hook 
+        shutdown 
+        templated 
+'
+    local +r keyword_validation
+    parse_conf "$conf_fn"
+    [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
+
+    # Postprocess and error trap the configuration
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    # Email for report
+    if [[ ! $subsidiary_mode_flag ]]; then
+        postprocess_email_for_report
+        err_trap_email_for_report
+    fi
+
+    # Limits
+    if [[ ! ${max_memory_size:-} =~ $limits_OK_regex ]]; then
+        emsg+=$msg_lf"Invalid max memory size $max_memory_size"
+        emsg+=" (does not match $limits_OK_regex)"
+    fi
+    if [[ ! ${n_open_files:-} =~ $limits_OK_regex ]]; then
+        emsg+=$msg_lf"Invalid number of open files $n_open_files"
+        emsg+=" (does not match $limits_OK_regex)"
+    fi
+
+    # Log retention
+    err_trap_uint "$log_retention" "Invalid log retention value"
+
+    # Mount
+    postprocess_mount_conf
+    err_trap_mount_conf
+
+    # Organisation name
+    postprocess_org_name_conf "${org_name:-}" "${org_name_optarg:-}" "$opt_o_flag"
+
+    # Post-hook
+    err_trap_post_hook_conf
+
+    # Pre-hook
+    err_trap_pre_hook_conf
+
+    # templated
+    postprocess_templated_conf
+    err_trap_templated_conf
+
+    # Snapshot
+    postprocess_snapshot_conf && err_trap_snapshot_conf
+
+    [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
+
+    # Finish if -C option (check the configuration)
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [[ $conf_check_flag ]] \
+        && { msg I "Configuration check OK for $conf_fn"; finalise 0; }
+
+    # Create and lock the PID file
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    do_pid "$(printf '%q ' "${args[@]}")"
+
+    # Log limits (memory, open files) or set if configured
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    do_limits
+
+    # Set default values
+    # ~~~~~~~~~~~~~~~~~~
+    # This cannot be done in parse_conf_templated as would normally be done
+    # because err_trap_templated_conf traps them being set when dest_dir is not
+    # set
+    if [[ ${dest_dir:-} != '' ]]; then
+        [[ ${dest_dir_usage_warning:-} = '' ]] && dest_dir_usage_warning=80
+        [[ ${retention:-} = '' ]] && retention=28
+    fi
+
+    fct "${FUNCNAME[0]}" 'returning'
+}  # end of function initialise
+
+source "$BUNG_LIB_DIR/msg.fun" || exit 1
+source "$BUNG_LIB_DIR/my_cat.fun" || exit 1
+source "$BUNG_LIB_DIR/parse_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/parse_conf_templated.fun" || exit 1
+source "$BUNG_LIB_DIR/parse_conf_word.fun" || exit 1
+
+#--------------------------
+# Name: parse_conf_assignment
+# Purpose:
+#   Parses a template file assignment statement
+# Arguments:
+#   $1 - the template line number
+# Global variable usage:
+#   Read:
+#       false
+#       line
+#       true
+#   Set:
+#       pc_emsg
+#       dynamic_vars[]
+# Output: none except via function fct
+# Return value: always 0; exits on error
+#--------------------------
+function parse_conf_assignment {
+    fct "${FUNCNAME[0]}" "started with template line number ${1:-}, line: ${2:-}"
+    local buf my_emsg var_name
+    local -r valid_var_name_regex='^_[a-zA-Z0-9_]+$'
+
+    # Parse arguments
+    # ~~~~~~~~~~~~~~~
+    if (($#!=2)); then
+        msg="Programmming error: ${FUNCNAME[0]} called with $# arguments instead of 2"
+        msg E "$msg (args: $*)"
+    fi
+    local -r line_n=$1
+    local -r line=$2
+
+    # Initialise
+    # ~~~~~~~~~~
+    local -r msg_part="$msg_lf"Line" $line_n"
+    my_emsg=
+
+    # Get variable name
+    # ~~~~~~~~~~~~~~~~~
+    msg D "Parsing an assignment on line $line_n"
+    buf=${line##*([[:space:]])}        # Strip leading space from line
+    buf=${buf%%=*}                     # Get string up to and excluding =
+    var_name=${buf%%*([[:space:]])}    # Strip trailing space from name
+    if [[ ! $var_name =~ $valid_var_name_regex ]]; then
+        my_emsg+="$msg_part invalid variable name $var_name"
+        my_emsg+=" (does not match $valid_var_name_regex)"
+        pc_emsg+="$my_emsg"
+        fct "${FUNCNAME[0]}" 'returning 1'
+        return 1
+    fi
+    msg D "var_name: $var_name"
+
+    # Get value
+    # ~~~~~~~~~
+    # Everything after any whitespace following = and up to the end of the line
+    if [[ $my_emsg = '' ]]; then
+        buf=${line#*=}                 # Strip up to and including =
+        buf=${buf##*([[:space:]])}     # Strip leading whitespace
+        dynamic_vars[$var_name]=$buf
+        msg D "Set dynamic variable $var_name: $buf"
+    fi
+
+    fct "${FUNCNAME[0]}" 'returning 0'
+    return 0
+}  # end of function parse_conf_assignment
+
+#--------------------------
+# Name: parse_conf_line_data
+# Purpose:
+#   Parses data from a conf line
+# Arguments:
+#   $1 - the template line number
+#   $2 - the pre-data regex
+# Global variable usage:
+#   Read:
+#       false
+#       true
+#   Set:
+#       data
+# Output: none except via function fct
+# Return value: always 0; exits on error
+#--------------------------
+function parse_conf_line_data {
+    fct "${FUNCNAME[0]}" "started with template line number ${1:-}, pre_data_regex: ${2:-}, line: ${3:-}"
+    local buf msg_part
+
+    # Parse arguments
+    # ~~~~~~~~~~~~~~~
+    if (($#!=3)); then
+        msg="Programmming error: ${FUNCNAME[0]} called with $# arguments instead of 3"
+        msg E "$msg (args: $*)"
+    fi
+    local -r line_n=$1
+    local -r pre_data_regex=$2
+    local -r line=$3
+
+    # Strip the pre-data regex match, leading space and trailing space
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    msg D "Parsing data from line $line_n, pre_data_regex: $pre_data_regex, line: $line"
+    data=$(echo "$line" \
+        | sed --regexp-extended \
+        -e "s/$pre_data_regex//" \
+        -e "s/^[[:space:]]*//" \
+        -e "s/[[:space:]]$//"
+    )
+    msg D "data: $data"
+
+    fct "${FUNCNAME[0]}" returning
+    return 0
+}  # end of function parse_conf_line_data
+
+source "$BUNG_LIB_DIR/postprocess_email_for_report.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_mount_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_org_name_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_templated_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_snapshot_conf.fun" || exit 1
+
+#--------------------------
+# Name: remove_old_backups
+# Purpose: checked the output from the rsync command; decides if it was OK
+# Arguments: none
+# Global variable usage:
+#   backup_dir_absolute: read
+#   backup_retention: read
+#   backup_subdir_regex: read
+#   dest_dir_remote_flag: read
+#   dest_dir_remote_host: read
+#   i (function backup's rsync_idx loop variable): read
+#   rsync_backup_dir: read
+#   rsync_cmd_ran_OK_flag: set
+#   rsync_out: read
+#   rsync_rc: read and set
+# Return code: always 0
+#--------------------------
+function remove_old_backups {
+    fct "${FUNCNAME[0]}" 'started'
+    local buf j
+    local remove_old_cmd remove_empty_cmd
+    local msg_part OK_to_continue old_PWD out
+    local remote_out remote_conf_fn
+    local -r tmp_fn=$tmp_dir/${FUNCNAME[0]}
+
+    # Nothing to do?
+    # ~~~~~~~~~~~~~~
+    if ((retention==0)); then
+        msg I "Not removing old files under $dest_dir (retention is 0)"
+        fct "${FUNCNAME[0]}" 'returning'
+        return 0
+    fi
+
+    # Remove old files
+    # ~~~~~~~~~~~~~~~~
+    msg I "Removing old files under $dest_dir"
+    remove_old_cmd=(
+        find
+        "${dest_dir:-UNSET-GUARD}"
+        -type f
+        -mtime +$((retention-1))
+        -execdir rm {} +
+    )
+    msg D "${FUNCNAME[0]}: remove_old_cmd: ${remove_old_cmd[*]}"
+    buf=$("${remove_old_cmd[@]}" 2>&1)
+    if [[ $buf = '' ]]; then
+
+        # Remove empty directories
+        # ~~~~~~~~~~~~~~~~~~~~~~~~
+        msg I "Removing empty directories under $dest_dir"
+        remove_empty_cmd=(
+            find
+            "${dest_dir:-UNSET-GUARD}"
+            -depth -mindepth 1
+            -type d
+            -empty -delete
+        )
+        msg D "${FUNCNAME[0]}: remove_empty_cmd: ${remove_empty_cmd[*]}"
+        buf=$("${remove_empty_cmd[@]}" 2>&1)
+        if [[ $buf != '' ]]; then
+            msg_part=$'\nCommand:\n'
+            msg_part+=${remove_empty_cmd[*]}
+            msg_part+=$'\nOutput:\n'
+            msg W "$msg_part$buf"
+        fi
+    else
+        msg_part=$'\nCommand:\n'
+        msg_part+=${remove_old_cmd[*]}
+        msg_part+=$'\nOutput:\n'
+        msg W "$msg_part$buf"
+    fi
+
+    fct "${FUNCNAME[0]}" 'returning'
+}  # end of function remove_old_backups
+
+source "$BUNG_LIB_DIR/report_dest_dir_usage.fun" || exit 1
+
+#--------------------------
+# Name: run_command
+# Purpose:
+#   Runs a command derived from the template
+# Arguments:
+#   $1 - the template line number
+# Global variable usage:
+#   Read:
+#       true and false
+#   Set:
+# Output: none except via function fct
+# Return value: always 0; exits on error
+#--------------------------
+function run_command {
+    fct "${FUNCNAME[0]}" "started with template line number ${1:-}, line: ${2:-}"
+    local options rc
+
+    # Parse arguments
+    # ~~~~~~~~~~~~~~~
+    if [[ ${2:-} = '' ]]; then
+        msg="Programmming error: ${FUNCNAME[0]} called with less than 2 arguments"
+        msg E "$msg (args: $*)"
+    fi
+    local -r line_n=$1
+    local -r cmd=($2)
+
+    # Populate options array for run_cmd_with_timeout
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Timeouts
+    # * Library function parse_conf_templated
+    #   * Defaults templated_timeout to 10
+    #   * Calls library function parse_conf_subkey_value
+    #     * Sets templated_timeout when finds subkeyword timeout 
+    # * Local function run_template
+    #   * Sets timeout_from_template when finds "Timeout: "
+    # * This function sets timeout_from_template empty after use
+    options=
+    [[ $error_rc_list != '' ]] && options+=(-e "$error_rc_list")
+    [[ $error_regex != '' ]] && options+=(-E "$error_regex")
+    [[ $OK_rc_list != '' ]] && options+=(-o "$OK_rc_list")
+    [[ $OK_regex != '' ]] && options+=(-O "$OK_regex")
+    if [[ $timeout_from_template != '' ]]; then
+        options+=(-t "$timeout_from_template")
+        timeout_from_template=
+    else
+        options+=(-t "$templated_timeout")
+    fi
+    [[ $warning_rc_list != '' ]] && options+=(-w "$warning_rc_list")
+    [[ $warning_regex != '' ]] && options+=(-W "$warning_regex")
+    unset 'options[0]'    # Remove the unwanted empty member
+
+    # Run the command
+    # ~~~~~~~~~~~~~~~
+    msg D "Running run_cmd_with_timeout with ${options[*]}"
+    run_cmd_with_timeout "${options[@]}"
+    rc=$?
+    case $rc in
+        0|1)
+            ;;
+        2)
+            msg E 'Timed out'
+            ;;
+        *)
+            msg E "${FUNCNAME[0]}: programming error: unexpected rc $rc"
+            ;;
+    esac
+
+    fct "${FUNCNAME[0]}" returning
+    return 0
+}  # end of function run_command
+
+source "$BUNG_LIB_DIR/run_cmd_with_timeout.fun" || exit 1
+
+#--------------------------
+# Name: run_template
+# Purpose: runs commands defined in the template file
+#--------------------------
+function run_template {
+    fct "${FUNCNAME[0]}" 'started'
+    local cmd data line line_n msg_part pc_emsg template_array
+    local template_line timeout_from_template unparsed_str var_name
+    local error_rc_list OK_rc_list warning_rc_list
+    local error_regex OK_regex warning_regex
+    local -A dynamic_vars
+    local -r assignment_line_regex='^[[:space:]]*[_[:alpha:]][_[:alnum:]]*[[:space:]]*='
+    local -r error_rc_list_line_regex='^Error rc list: '
+    local -r error_regex_line_regex='^Error regex: '
+    local -r ignorable_line_regex='^[[:space:]]*(#|$)'
+    local -r OK_rc_list_line_regex='^OK rc list: '
+    local -r OK_regex_line_regex='^OK regex: '
+    local -r rc_list_regex='^(>|<|>=|<=|!=|==)[[:digit:]]+(,(>|<|>=|<=|!=|==)[[:digit:]]+)*$'
+    local -r reserved_varname_regex='^[[:space:]]*dest_dir[[:space:]]*='
+    local -r timeout_line_regex='^Timeout: '
+    local -r warning_rc_list_line_regex='^Warning rc list: '
+    local -r warning_regex_line_regex='^Warning regex: '
+
+    # Process each line in the template
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Template lines may be:
+    #   * Ignorable (comments, empty and only whitespace)
+    #   * Assignment (<name> = <value>)
+    #   * Return code lists.  Command return codes which indicate:
+    #       * OK so no message should be generated
+    #       * Warning so a warning message should be generated
+    #       * Error so an error message should be generated
+    #   * Output matching regexes which, when matched, indicate:
+    #       * OK so no message should be generated
+    #       * Warning so a warning message should be generated
+    #       * Error so an error message should be generated
+    #   * Commands (anything which is not one of the above)
+    msg I "Processing template file $template_fn"
+    mapfile -t template_array <"$template_fn"
+    timeout_from_template=
+    for ((i=0;i<${#template_array[*]};i++))
+    do
+        line=${template_array[i]}
+        line_n=$((i+1))
+        [[ $line =~ $ignorable_line_regex ]] && continue
+        msg D "line $line_n: '$line'"
+
+        # Set defaults
+        # ~~~~~~~~~~~~
+        error_rc_list=
+        error_regex=
+        OK_rc_list=
+        OK_regex=
+        pc_emsg=
+        warning_rc_list=
+        warning_regex=
+
+        # Return code lists
+        # ~~~~~~~~~~~~~~~~~
+        if [[ $line =~ $OK_rc_list_line_regex ]]; then
+            parse_conf_line_data $line_n "$OK_rc_list_line_regex" "$line"
+            OK_rc_list=$data
+            msg D "OK_rc_list: $OK_rc_list"
+            continue
+        elif [[ $line =~ $warning_rc_list_line_regex ]]; then
+            parse_conf_line_data $line_n "$warning_rc_list_line_regex" "$line"
+            warning_rc_list=$data
+            msg D "warning_rc_list: #warning_rc_list"
+            continue
+        elif [[ $line =~ $error_rc_list_line_regex ]]; then
+            parse_conf_line_data $line_n "$error_rc_list_line_regex" "$line"
+            error_rc_list=$data
+            msg D "error_rc_list: $error_rc_list"
+            continue
+        fi
+
+        # Output regexes
+        # ~~~~~~~~~~~~~~
+        if [[ $line =~ $OK_regex_line_regex ]]; then
+            parse_conf_line_data $line_n "$OK_regex_line_regex" "$line"
+            OK_output_regex=$data
+            msg D "OK_output_regex: $OK_output_regex"
+            continue
+        elif [[ $line =~ $warning_regex_line_regex ]]; then
+            parse_conf_line_data $line_n "$warning_regex_line_regex" "$line"
+            warning_output_regex=$data
+            msg D "warning_output_regex: $warning_output_regex"
+            continue
+        elif [[ $line =~ $error_regex_line_regex ]]; then
+            parse_conf_line_data $line_n "$error_regex_line_regex" "$line"
+            error_output_regex=$data
+            msg D "error_output_regex: $error_output_regex"
+            continue
+        fi
+
+        # Timeout
+        # ~~~~~~~
+        if [[ $line =~ $timeout_line_regex ]]; then
+            parse_conf_line_data $line_n "$timeout_line_regex" "$line"
+            timeout_from_template=$data
+            msg D "timeout_from_template: $timeout_from_template"
+            continue
+        fi
+
+        # Assignment
+        # ~~~~~~~~~~
+        if [[ $line =~ $assignment_line_regex ]]; then
+            if [[ $line =~ $reserved_varname_regex ]]; then
+                msg_part="$template_fn: line $line_n:"
+                msg E "$msg_part dest_dir is a reserved variable name"
+            fi
+            substitute_tokens $line_n
+            parse_conf_assignment $line_n "$line"
+            continue
+        fi
+
+        # Template parsing errors
+        # ~~~~~~~~~~~~~~~~~~~~~~~
+        if [[ $pc_emsg != '' ]]; then
+            msg E "$pc_emsg"
+        fi
+
+        # Command
+        # ~~~~~~~
+        substitute_tokens $line_n
+        run_command $line_n "$line"
+
+    done
+
+    fct "${FUNCNAME[0]}" 'returning'
+}  # end of function run_template
+
+#--------------------------
+# Name: substitute_tokens
+# Purpose:
+#   Substututes any tokens in the line
+# Arguments:
+#   $1 - the template line number
+# Global variable usage:
+#   Read:
+#       line
+#       true and false
+#   Set:
+#       line
+# Output: none except via function fct
+# Return value: always 0; exits on error
+#--------------------------
+function substitute_tokens {
+    fct "${FUNCNAME[0]}" "started with template line number $1"
+    local buf i var_name
+
+    # Substitute any standard tokens
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    msg D "Line before substituting standard tokens: $line"
+    [[ ${dest_dir:-} != '' ]]     && line=${line//%dest_dir%/$dest_dir}
+    [[ ${device_type:-} != '' ]]  && line=${line//%device_type%/$device_type}
+    [[ ${git_root_dir:-} != '' ]] && line=${line//%git_root%/$git_root_dir}
+    [[ ${hostname:-} != '' ]]     && line=${line//%hostname%/$hostname}
+    [[ ${identity_fn:-} != '' ]]  && line=${line//%identity_file%/$identity_fn}
+    [[ ${password:-} != '' ]]     && line=${line//%password%/$password}
+    [[ ${tftp_root:-} != '' ]]    && line=${line//%tftp_root%/$tftp_root}
+    [[ ${tftp_server:-} != '' ]]  && line=${line//%tftp_server%/$tftp_server}
+    line=${line//%template%/$template_fn}
+    line=${line//%tmp_dir%/$tmp_dir}
+    [[ ${username:-} != '' ]]     && line=${line//%username%/$username}
+    msg D "Line after substituting standard tokens: $line"
+
+    # Substitute any dynamic tokens
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    for var_name in "${!dynamic_vars[@]}"
+    do
+        line=${line//%$var_name%/${dynamic_vars[$var_name]}}
+        msg D "Line after substituting %$var_name%: $line"
+    done
+    msg D "Line after substituting dynamic tokens: $line"
+
+    # Trap any unsubstituted tokens
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    if [[ ${line//%/} != $line ]]; then
+       msg E "$template_fn: line $1: invalid line (has % after substitution): $line"
+    fi
+
+    # TODO (if there is a use case):
+    #   * Support escaped % in command
+    #   * Support " quoted words including escaped " in quotes
+
+    fct "${FUNCNAME[0]}" returning
+    return 0
+}  # end of function substitute_tokens
+
+source "$BUNG_LIB_DIR/run_pre_hooks.fun" || exit 1
+source "$BUNG_LIB_DIR/usage.fun" || exit 1
+
+#--------------------------
+# Name: main
+# Purpose: where it all happens
+#--------------------------
+[[ ${BUNG_COMPGEN_DIR:-} != '' ]] && compgen -v >> $BUNG_COMPGEN_DIR/initial.vars
+initialise "${@:-}"
+do_snapshots
+do_mounts
+((pre_hook_idx>-1)) && run_pre_hooks
+run_template
+[[ ${git_root_dir:-} != '' ]] && do_git
+if [[ ${dest_dir:-} != '' ]]; then
+    remove_old_backups
+    dest_dir_remote_flag=$false
+    report_dest_dir_usage
+fi
+finalise 0

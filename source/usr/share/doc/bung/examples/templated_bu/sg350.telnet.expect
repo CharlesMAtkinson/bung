@@ -1,0 +1,23 @@
+#!/usr/bin/expect
+
+## TomDV
+## http://blog.penumbra.be/2010/02/expect-scripts-backup-cisco-config/
+
+# ---------------- configuration ---------------- #
+set switch_fqdn [lindex $argv 0]
+set username [lindex $argv 1]
+set password [lindex $argv 2]
+set tftp_server [lindex $argv 3]
+set timeout 55
+
+# -------------- do not edit below -------------- #
+spawn telnet $switch_fqdn
+expect "User Name:"
+send "$username\n"
+expect "Password:"
+send "$password\n"
+
+expect "#"
+send "copy running-config tftp://$tftp_server/$switch_fqdn/config\n"
+expect "#"
+send "exit\n"

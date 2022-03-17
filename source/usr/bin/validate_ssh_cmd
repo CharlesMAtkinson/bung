@@ -1,0 +1,125 @@
+#! /bin/bash
+
+# Copyright (C) 2021 Charles Atkinson
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+
+# Purpose: validates an ssh command and, if it passes, execs it.
+
+# Usage: 
+#   * Intended to be named in .ssh/authorized_keys after a command=
+#     as part of the bung suite
+#   * Reads command validation regexes array from conffile
+#     Default conffile /etc/bung/validate_ssh_cmd.conf
+
+# Shell configuration
+set -o nounset
+shopt -s extglob
+
+# Utility variables
+readonly false=
+readonly true=true
+readonly msg_prefix=$0
+readonly absolute_regex=^/
+
+# Parse args
+conf_fn=/etc/bung/validate_ssh_cmd.conf
+[[ ${1:-} != '' ]] && conf_fn=$1
+
+# Read conffile
+source "$conf_fn"
+rc=$?
+if ((rc!=0)); then
+    echo "$msg_prefix (could not read $conf_fn)" >&2
+    exit 1
+fi
+
+# Validate conffile
+if [[ ${regexes:-} = '' ]]; then
+    echo "$msg_prefix (did not get regexes from $conf_fn)" >&2
+    exit 1
+fi
+if [[ ${log_fn:-} = '' ]]; then
+    echo "$msg_prefix (did not get log_fn from $conf_fn)" >&2
+    exit 1
+else
+    if [[ $log_fn =~ $absolute_regex ]]; then
+        my_log_fn=$log_fn
+    else
+        my_log_fn=$PWD/$log_fn
+    fi
+    log_dir=${my_log_fn%/*}
+    if [[ ! -d "$log_dir" || ! -w "$log_dir" ]]; then
+        echo "$msg_prefix: $log_dir is not a writeable directory" >&2
+        exit 1
+    fi
+fi
+
+# Parsing regexes
+readonly backslash_regex='^\\'
+readonly word_end_regex='^([[:space:]]|$)'
+
+# Validate
+[[ ${SSH_ORIGINAL_COMMAND:-} = '' ]] && SSH_ORIGINAL_COMMAND=
+matched_flag=$false
+for ((i=0;i<${#regexes[*]};i++))
+do
+    if [[ "$SSH_ORIGINAL_COMMAND" =~ ${regexes[i]} ]]; then
+        matched_flag=$true
+        break
+    fi
+done
+
+if [[ $matched_flag ]]; then
+    msg="$(date '+%H:%M:%S') matched $SSH_ORIGINAL_COMMAND"
+    echo "$msg" >> "$my_log_fn"
+
+    # Reconstitute command into words, processing any backslash escapes
+    unset cmd
+    str=$SSH_ORIGINAL_COMMAND
+    word=
+    while [[ "$str" != '' ]]          # For each word
+    do
+        str=${str##*([[:space:]])}    # Discard any leading spaces and tabs
+        while true                    # For each character
+        do
+            if [[ "$str" =~ $word_end_regex ]]; then
+                cmd+=("$word")
+                word=
+                break
+            elif [[ "$str" =~ $backslash_regex ]]; then
+                next_char="${str:1:1}"
+                if [[ "$next_char" = '' ]]; then
+                    echo "$msg_prefix (trailing backslash in $SSH_ORIGINAL_COMMAND)" >&2
+                    exit 1
+                else
+                    word+=$next_char
+                    str=${str:2}
+                fi
+            else
+                word+=${str:0:1}
+                str=${str:1}
+            fi
+        done
+    done
+    exec "${cmd[@]}"
+else
+    echo "Command did not pass validation: $SSH_ORIGINAL_COMMAND" >> "$my_log_fn"
+    echo "$(hostname) ${0##*/}: Command did not pass validation" >&2
+    echo "$(hostname) ${0##*/}: Command was $SSH_ORIGINAL_COMMAND" >&2
+    echo "$(hostname) ${0##*/}: Did not match any regex in $conf_fn" >&2
+    exit 1
+fi
+

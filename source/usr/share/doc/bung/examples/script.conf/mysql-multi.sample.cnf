@@ -1,0 +1,12 @@
+# mysql-multi.sample.cnf
+#
+# Sample MySQL defaults-file for use with mysql_bu when backing up mysqld
+# using non standard socket and port (as used by mysqld-multi)
+#
+# Format reference: http://dev.mysql.com/doc/refman/5.5/en/option-files.html
+
+[client]
+user=backup_user
+password=super-secret
+port=3308
+socket=/var/run/mysqld/mysqld2.sock

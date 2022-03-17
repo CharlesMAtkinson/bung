@@ -1,0 +1,48 @@
+# Template file for bung's templated_bu.sh
+
+# For backing up Mikrotik devices
+
+# Set convenience variables
+_git_subdir = %git_root%/%hostname%
+_dest_subdir = %dest_dir%/%hostname%
+
+# Ensure required directories
+OK rc list: ==0
+/home/nc/bin/mikrotik.template.helper.sh -D %_git_subdir% -t %tmp_dir%
+OK rc list: ==0
+/home/nc/bin/mikrotik.template.helper.sh -D %_dest_subdir% -t %tmp_dir%
+
+# Generate export file on device
+Timeout: 120
+ssh %hostname% export file=%hostname%.exported
+
+# Copy to git (exported files) tree
+OK regex: ^$
+scp -p -q -r %hostname%:/%hostname%.exported.rsc %_git_subdir%
+
+# Remove from router
+OK regex: ^$
+ssh %hostname% file remove %hostname%.exported.rsc
+
+# Remove the time of generation timestamp, troublesome in git
+OK rc list: ==0
+/home/nc/bin/mikrotik.template.helper.sh -e %_git_subdir%/%hostname%.exported.rsc -t %tmp_dir%
+
+# Generate backup ("binary") file on device
+Timeout: 120
+ssh %hostname% system backup save dont-encrypt=yes name=%hostname%
+
+# Copy to non-git tree
+OK regex: ^$
+scp -p -q -r %hostname%:/%hostname%.backup %_dest_subdir%/%hostname%.backup
+
+# Remove from router
+OK regex: ^$
+Timeout: 20
+ssh %hostname% file remove %hostname%.backup
+
+# Backup files
+OK rc list: ==0
+Timeout: 60
+/home/nc/bin/mikrotik.template.helper.sh -b %dest_dir%/%hostname% -r %hostname% -t %tmp_dir%
+

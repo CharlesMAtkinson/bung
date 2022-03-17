@@ -1,0 +1,945 @@
+--------------------------------------------------------------------------------
+Version 3.2.2  17 Mar 2022
+
+* Bug #13511 "rsync_bu: hangs when there's no known_hosts entry for the remote host" bugfix
+* Bug #13675 openldap_bu: section 5 man page: shows old version and no release date
+* Task #13678 git and issue tracker: make public
+* Task #13741 Release procedure: move from the Programmer's Guide to a dedicated document
+  Note: "Backup scripts next generation Publisher's Guide" was still in preparation when version 3.2.2 was published
+
+--------------------------------------------------------------------------------
+Version 3.2.1  12 Feb 2022
+
+* Documentation #12897 Missing postgresql_bu configuration sample
+* Bug #12900 .deb: postrm script: purge: /etc/opt/bung instead of /etc/bung
+* Task #12994 Examples: update Mikrotik hook scripts and templates
+* Feature #13503 bung: enable non-root user for remote rsync
+* Bug #13511 rsync_bu: hangs when there's no known_hosts entry for the remote host
+* Task #13504 run_remote_agent: reduce logging verbosity
+* Task #13509 All scripts: simplify the signal trapping and reporting code
+* Feature #13518 initialise_1.scrippet: unprivileged use: default the conf, log, PID and tmp_root dirs
+* Feature #13569 rsync_bu: log the rsync command in a format which can be run by copy and paste
+
+Migration notes
+
+* No configuration changes are required for migration from 3.1.x to 3.2.x
+* Debian 8 Jessie is no longer supported
+
+--------------------------------------------------------------------------------
+Version 3.2.0  3 Feb 2022
+
+Test release
+
+--------------------------------------------------------------------------------
+Version 3.1.1  10 Sep 2021
+
+* Feature #12832 "bung: make backups to hotplug storage interruptible" bugfix
+* Bug #12874 finalise function: email_for_report_msg_level: not set after early error 
+
+--------------------------------------------------------------------------------
+Version 3.1.0  8 Sep 2021
+
+* Bug #12525 my_cat function: "sed: -e expression #1, char 8: expected newer version of sed"
+* Bug #12829 sysinfo: spurious error when /etc/network/interfaces does not exist
+* Bug #12725 do_umounts.fun: when umount fails with "not mounted", do not diagnose
+* Feature #12843 run_cmd_with_timeout.fun: invocation error message: add command
+* Bug #12845 bung: function notify_finally: "Get the file system usage" fails when called before temporary directory created
+* Feature #12832 bung: make backups to hotplug storage interruptible
+* Feature #12485 run_subsidiary_scripts function: in case of interrupt, log the interrupt number and symbol
+
+--------------------------------------------------------------------------------
+Version 3.0.8  29 Jun 2021
+
+* Task #12373 User Guide and debian/control: revise bung description
+* No issue: Programmer's Guide: clarify release procedure
+
+--------------------------------------------------------------------------------
+Version 3.0.7  15 Jun 2021
+
+* Feature #12100 finalise function: log the command used to spin down
+* Feature #12238 /usr/share/doc/bung/examples/templated_bu/mikrotik.template.helper.sh:
+  add empty file warning
+* No issue: User Guide: clarify overview
+* No issue: .deb packaging: clarify description
+* No issue: Programmer's Guide: clarify release procedure
+
+--------------------------------------------------------------------------------
+Version 3.0.6  9 Apr 2021
+
+* Feature #11994 Common keyword Mount: add sub_keyword no_fsck
+
+--------------------------------------------------------------------------------
+Versions 3.0.0 to 3.0.5
+
+Development versions implementing transition to Debian standards compliance
+
+* Bug #11074 .deb: add dependency on packages at and lsscsi
+* Bug #11679 *.sh: post- and pre-hook bugs 
+* Bug #11722 templated_bu.sh: template Timeout line: not effective 
+* Bug #11671 run_cmd_with_timeout.fun: rc logic error when -o specified without
+  -e or -w 
+* Task #11751 templated_bu.sh: update example hook scripts and the scripts they
+  call
+* Bug #11757 sysinfo_bu.sh: conf with hooks: library parsing functions not found
+* Bug #11758 sysinfo_bu.sh: fdisk "does not start on physical sector boundary"
+  error terminates the script 
+* Feature #11783 Messsage "Unserviced file system type": also report fs_spec
+  value 
+* Bug #11796 mysql_bu.sh: database "sys" not excluded 
+* Feature #11799 Common keyword Email for report: add option to send
+  conditionally based on warning and error status
+* Bug #11808 Post-hook return code requesting warning message generates error
+  message 
+* Bug #11833 rsync_bu.sh: subkeyword dest_dir_usage_warning ignored 
+* Task #11880 validate_ssh_cmd: update to use conffile 
+* Bug #11897 rsync_bu: conffile without rsync keyword: "src_dir: unbound
+  variable"
+* Task #11911 etc/logcheck/ignore.d.server/bung: make specific to bung scripts
+* Feature #11919 hotplug_bu: do not delay the initial notification 
+* Bug #11940 .deb postinst and postrm scripts: create and remove /var/log/bung
+* Feature #11952 sysinfo_bu: remove BLLIS conf logging 
+* Bug #11984 /usr/bin/validate_ssh_cmd: does not handle no command
+
+--------------------------------------------------------------------------------
+Version 2.1.0  1 Jan 2021
+
+* Bug #9045 sysinfo_bu.sh: "normal" fdisk output reported as an error 
+* Bug #9209 run_subsidiary_scripts.fun: email report summary: spurious lines
+* Bug #10676 mysql_bu.sh: conf option "exclude" does not work 
+* Bug #11014 User Guide: PostgreSQL configuration: fix script name 
+* Bug #11074 .deb: add dependency on package "at"
+* Bug #11335 mikrotik.template.helper.sh: function backup_files: create
+  directories as required and ensure files writeable 
+* Bug #11382 bung .deb: does not update an existing /opt/bung symlink
+* Feature #173 rsync_bu.sh: remove newly excluded files from the destination
+  directory
+* Feature #2425 sysinfo_bu.sh: get_sd_hw_info: add support for HP hardware RAID
+* Feature #9010 "SIGCHLD handling: ignore it".  Fixed example hook scripts
+* Feature #9511 hotplug_bu.sh: include file system usage in "Do not unplug" and
+  "OK to unplug" notifications
+* Feature #9524 hotplug_bu.sh and super_bu.sh: add support for mounts and
+  snapshots
+* Feature #10385 templated_bu.sh: change git_pull_OK_regex to also suit Buster's
+  version of git 
+* Feature #10609 mysql_bu.sh: do not back up database sys 
+* Feature #11308 sysinfo_bu.sh: add support for NVMe devices
+* Feature #11359 opt/share/doc/examples/rsync.exclude/whole_tree.exclude: add
+  "/home/*/VirtualBox VMs/*" 
+* Feature #11426 rsync_bu.sh: add option --bwlimit
+* Feature #11433 Common configuration: add support for multiple pre- and 
+  post- hooks
+* Feature #11435 Subsidiary script keyword: add optional sub-keyword schedule
+* Feature #11438 sysinfo_bu.sh: get_sd_hw_info: smartctl -a output "Unable to
+  detect device type": ignore and skip the device
+* Feature #11541 templated_bu.sh: add variables device_type, password,
+  tftp_root and tftp_server
+* Feature #11558 Allow hotplug_bu.sh and supervisor_bu.sh to run
+  supervisor_bu.sh
+
+--------------------------------------------------------------------------------
+Version 2.1.x migration notes
+
+* Files may be removed from the backup destination directory by Feature #173
+  rsync_bu.sh: remove newly excluded files from the destination directory
+* No special steps are required for migration from 2.0.x to 2.1.x
+
+--------------------------------------------------------------------------------
+Version 2.0.5  24 Dec 2020
+
+Development version
+
+--------------------------------------------------------------------------------
+Version 2.0.4  23 Dec 2020
+
+Development version
+
+--------------------------------------------------------------------------------
+Version 2.0.3  25 Nov 2020
+
+Development version
+
+--------------------------------------------------------------------------------
+Version 2.0.2  19 Sep 2019
+
+* Feature #9010 SIGCHLD handling: ignore it
+
+--------------------------------------------------------------------------------
+Version 2.0.1  29 Jun 2019
+
+* Bug #8570 "User Guide: installation procedure wrong"
+
+--------------------------------------------------------------------------------
+Version 2.0.0  28 Jun 2019
+
+* Feature #5649 "Common configuration: add pre- and post- hooks" 
+* Task #7380 "rsync_bu.sh: shortage of memory and open files limit"
+* Task #7680 "bung: make more FHS compliant"
+* Bug #7623 "super_bu.sh: -t option not passed to subsidiary script"
+* Task #8337 "Example cron.daily file: update to use "at""
+
+--------------------------------------------------------------------------------
+Version 2.0.x migration notes
+
+No special steps are required for migration from 1.20.x to 2.0.x
+
+--------------------------------------------------------------------------------
+Version 1.20.1  3 Sep 2018
+
+* Bug #6475 "rsync_bu section 8 man page: -p option: path missing"
+* Bug #6466 "postgres_bu section 5 man page: wrongly lists defaults_file as a
+  subkeyword"
+* Bug #6488 "err_trap_mount_conf.fun: "command not found""
+
+--------------------------------------------------------------------------------
+Version 1.20.0  18 Aug 2018
+
+* Task #6363 parse_conf_subkey_value: receive subkey validation data from caller
+* Task #6385 rsync_bu.sh: change conf arrays to scalars
+* Task #6388 parse_conf: receive keyword validation data from caller
+* Bug #6393 bung: cannot be run by unprivileged user
+* Bug #6405 rsync_bu.sh: IFS: unbound variable
+* Feature #6476 templated_bu.sh: create
+
+--------------------------------------------------------------------------------
+Version 1.20.x migration notes
+
+No special steps are required for migration from 1.19.x to 1.20.x
+
+--------------------------------------------------------------------------------
+Version 1.19.3  27 Jul 2018
+
+* Bug #6298 "rsync_bu.sh: rsync error not reported"
+* Feature #6297 "rsync_bu.sh: add conf option to override --numeric-ids"
+
+--------------------------------------------------------------------------------
+Version 1.19.2  6 Jul 2018
+
+* Documentation updates only
+
+--------------------------------------------------------------------------------
+Version 1.19.1 (beta) 28 Jun 2018
+
+* General bugfixes, no issue
+
+--------------------------------------------------------------------------------
+Version 1.19.0 (alpha) 27 Jun 2018 
+
+* Bug #5444 "sysinfo_bu.sh: wrongly detects Stretch Xen Dom0 as DomU"
+* Feature #5855 "rsync_bu.sh: add option --numeric-ids"
+* Bug #6106 "sysinfo_bu.sh: BLLIS conffile: latest not selected"
+* Bug #5895 "sysinfo_bu.sh: databases report: add postgres"
+* Task #5970 "tmp_dir: create under /run rather than /tmp"
+* Feature #6027 "mysql_bu: add --hex-blob to mysqldump options"
+* Task #5911 "hotplug_bu.sh: update for Stretch"
+* Feature #5605 "Create backup directory, if missing from disk"
+* Bug #5482 "rsync_restore.sh: various bugfixes"
+* Feature #5645 "LVM snapshots: log by /dev/dm-:digit:+ name"
+* Bug #5646 "rsync_bu.sh: rsync "IO error encountered -- skipping file deletion"
+  does not generate error"
+
+--------------------------------------------------------------------------------
+Version 1.19.x migration notes
+
+No special steps are required for migration from 1.18.x to 1.19.x
+
+--------------------------------------------------------------------------------
+Version 1.18.3  25 Feb 2018
+
+* Task #5295 umount: add sleep (and create function)
+* Bug #5224 run_remote_agent: missing break
+* Documentation #5223 run_remote_agent.fun: fix comment
+
+--------------------------------------------------------------------------------
+Version 1.18.3 migration notes
+
+No special steps are required for migration from 1.18.x to 1.18.3
+
+--------------------------------------------------------------------------------
+Version 1.18.2  24 Nov 2017
+
+* Bug #4759 "rsync_bu.sh: try_rsync_again_regex: unbound variable"
+
+--------------------------------------------------------------------------------
+Version 1.18.2 migration notes
+
+No special steps are required for migration from 1.18.x to 1.18.2
+
+--------------------------------------------------------------------------------
+Version 1.18.1  31 Oct 2017
+
+* Bug #4712 rsync_bu.sh: report error for wildcarded rsync return code
+* Task #4637 sysinfo_bu.sh: on Stretch: "Command ifconfig not available"
+* Bug #4597 sysinfo_bu.sh: on Stretch: "Command route not available"
+* Feature #4571 finalise.fun: log sending report mail
+* Bug #4256 sysinfo_bu.sh: on Jessie, wrongly detects platform as LXC
+* Bug #4373 rsync_bu.sh: does not generate an error when rsync not found
+
+--------------------------------------------------------------------------------
+Version 1.18.1 migration notes
+
+No special steps are required for migration from 1.18.0 to 1.18.1
+
+--------------------------------------------------------------------------------
+Version 1.18.0  3 Jul 2017
+
+* Bug #3330 rsync_bu.sh 5 man page: sub-option retry: not documented
+* Bug #3818 Hotplug popups: "Do not unplug ..." not removed when "OK to unplug"
+  displayed
+* Feature #3813 var.exclude and whole_tree.exclude: add /var/lib/mysql/ibdata1
+* Feature #403 Postgres backup script
+* Bug #3227 Mount keyword: usage_warning subkeyword: not error trapped
+
+--------------------------------------------------------------------------------
+Version 1.18.0 migration notes
+
+No special steps are required for migration from 1.17.0 to 1.18.0
+
+--------------------------------------------------------------------------------
+Version 1.17.0  11 Nov 2016
+
+* Feature #2961 sysinfo_bu.sh: do not check CD/DVD drives
+* Task #2956 remote_agent.sh: create
+* Task #2918 run_script_on_remote_host: create function
+* Feature #2930 sysinfo_bu.sh: STORAGE section: support physical block devices
+  other than /dev/sd[a-z]
+* Bug #2917 rsync_bu.sh: fix detection of remote rsync backup directory
+* Feature #2909 rsync_bu: change default retry count from 0 to 2
+* Bug #1609 mysql_bu.sh: : line 147: mysql: command not found
+* Feature #1905 No network connection: retry at intervals before failing with an
+  error
+* Feature #2789 sysinfo_bu.sh: PACKAGES section: add version
+* Bug #2604 sysinfo_bu.sh: df: does not list only local file systems
+* Bug #2526 bung.rsync(5) man page: second syntax: source_dir for SRC and
+  similar for DEST
+* Bug #2603 openldap_bu.sh: does not back up anything when dest_dir configured
+* Bug #2343 do_mounts: fsck: "recovering journal" is routine output for a
+  snapshot
+* Bug (no reference): sysinfo_bu.sh: fix hardware/DomU detection on Xen systems
+* Feature (no reference): sample rsync exclude files: evolution in the light of
+  operational experience
+* Feature #2264: Mount: support mounting already mounted file systems
+
+--------------------------------------------------------------------------------
+Version 1.17.0 migration notes
+
+* Push backups by 1.17.0 require 1.17.0 on the remote system
+
+--------------------------------------------------------------------------------
+Version 1.16.x
+
+* Development series.  Changes made are logged above as 1.17.0 changes
+
+--------------------------------------------------------------------------------
+Version 1.15.2  1 Jun 2016
+
+Pilot release for testing on a variety of production computers
+
+* Few bugs fixed during pilot rollout
+
+Migration notes: listed in "Version 1.15.x migration notes" below
+
+--------------------------------------------------------------------------------
+Version 1.15.1  27 May 2016
+
+Pilot release for testing on a variety of production computers
+
+* Multiple bugs fixed during test suite usage
+
+Migration notes: listed in "Version 1.15.x migration notes" below
+
+--------------------------------------------------------------------------------
+Version 1.15.0  18 May 2016
+
+Beta release
+
+* Bug #1672: Mountpoints: accept trailing / characters
+* Bug #1679: sysinfo_bu.sh: some output files have multiple lsblk output
+* Bug #1660: mysql_bu.sh: mysqldump errors not detected as errors
+* Bug #1680: sysinfo_bu.sh: fails to detect partition table type
+* Bug #1702: mysql_bu.sh and parse_conf.fun: subkeyword defaults_file not
+  supported
+* Bug #1738: finalise function: report an error when called with 1 and neither
+  warning_flag nor error_flag set
+* Bug #1739: sysinfo_bu.sh: does not remove old output files
+* Bug #1768: rsync_bu.sh: local backup FS: wrong variable name in warning
+  messages when unexpected find output
+* Bug #1663: Locale: set to en_GB.UTF-8
+* Bug #2070: Log summary: does not show "There was at least one interrupt"
+* Bug #2059: finalise function: $1 values serviced do not match full range set
+  in initialise_1.scrippet
+* Bug #1673: sysinfo_bu.sh: no HDD serial or model number
+* Bug #2136: finalise: snapshot_dev_mapper_vg_lv is tested but never set
+* Feature #1799: sysinfo_bu.sh: in case there is /root/etc/bllis content,
+  include the newest file in the sysinfo report
+* Feature #1902: MariaDB backup
+* Feature #2140: Remove amanda_bu.sh and rdiff_backup.sh
+* Task #1677: Review file system usage reports and warnings
+
+--------------------------------------------------------------------------------
+Version 1.15.x migration notes
+
+* amanda_bu.sh has been withdrawn (it was not used).
+* ldap_bu.sh has been renamed as openldap_bu.sh.
+  The name change may need to be applied in:
+  * super_bu.sh config files
+  * hotplug_bu.sh config files
+  * Scheduled jobs
+* openldap_bu.sh's keywords have been harmonised with the other scripts:
+  > "LDAP tar directory" is replaced by OpenLDAP's dest_dir sub-keyword
+  > "LDAP tar retention" is replaced by OpenLDAP's retention sub-keyword
+  Existing ldap_bu.sh configuration files must be updated to use
+  openldap_bu.sh's format as detailed in the bung.openldap_bu (5) man page.
+* Mount keyword's usage_warning sub-keyword has been withdrawn.
+  It must be removed from any config files it appears in.
+  The MySQL, OpenLDAP, rsync, and sysinfo keywords now all have a
+  dest_dir_usage_warning sub-keyword which replaces the withdrawn sub-keyword's
+  functionality.
+* mysql_bu.sh's sub-keyword dest_dir's default has changed from
+  /mnt/backup/mysql to /var/backup/mysql (the commonly used value).
+  In case the default was used, add dest_dir=/mnt/backup/mysql
+* rdiff_backup.sh has been withdrawn (it was not used).
+* rsync_bu.sh's rsync keyword has a new sub-keyword, "retry".  It controls
+  the number of times the rsync command is retried on failure.  Default 0
+  retries.
+* rsync_bu.sh retries commands on remote hosts before generating an error.  It
+  is set to a 20 second delay and 180 retry count (gives one hour), not
+  configurable pending use-case demonstration.
+
+--------------------------------------------------------------------------------
+Version 1.14.3  20 Nov 2015
+
+Bugfix and minor feature release
+
+* Bug #479: Report email: sometimes the original body is converted to an
+      unamed attachment.  Fixed bugs in bugfix
+* Bug #1594 sysinfo_bu.sh: get_platform: workaround "hash udevadm" returning 0
+      when udevadm not available.  Changed to a more robust test
+* Bug #1595: sysinfo_bu.sh: get_databases: bad test for database presence
+* Bug #1616: sysinfo_bu.sh: get_databases: list databases fails in a small
+      number of cases
+* Task #1593: super_bu.sh: remove need for bc.  Also for hotplug_bu.sh
+
+--------------------------------------------------------------------------------
+Version 1.14.2  5 Nov 2015
+
+Bugfix and minor feature release
+
+* Bug #1556: rsync_bu.sh: rsync: "make_bak_dir mkdir <path> failed: File exists 
+      (17)" etc. errors (again)"
+      Fixed bug in implementation.
+* Bug #1563: validate_ssh_cmd.sh: "(-- )?" missing from scp_regex
+* Feature #1564: rsync_bu.sh: add message showing command used to copy script to
+      remote host
+* Feature #1566: run_subsidiary_scripts: summary: add mysqldump warnings and
+      errors
+
+--------------------------------------------------------------------------------
+Version 1.14.1  24 Oct 2015
+
+* Bug #479: Report email: sometimes the original body is converted to an unnamed
+      attachment
+* Bug #558: PID file content shown empty in log
+* Bug #766: finalise function: report mail: needs lines between summary and log
+* Bug #778: postprocess_mount_conf.fun: fails with "fs_spec: unbound variable"
+      when fs_spec is invalid
+* Bug #824: man pages: "(no subject)" in man -k output
+* Bug #935: finalise function: email_for_report[*]: unbound variable
+* Bug #974: do_mounts: add sleep and process kill after loop waiting for
+      backgrounded mount
+* Bug #988: ldap_bu.sh: fails when /etc/ldap.secret does not exist
+* Bug #1053: mysql_bu.sh: mysqldump message "Couldn't execute 'show create
+      table ...": report as a warning
+* Bug #1122: do_snapshots: sometimes fails to create a snapshot after removing a
+      pre-existing one
+* Bug #1245: validate_ssh_cmd.sh: pilot/debug in production
+* Bug #1375 "hotplug_bu_launcher.sh: /opt/bung/lib/parse_conf.fun: line 198: 
+      parse_conf_subsidiaryscript: command not found"
+* Bug #1377: man pages: when listed with man -k, show "(unknown subject)"
+* Bug #1416: GUI on-screen messages not appearing
+* Documentation #795: mysql_bu.sample.conf
+* Feature #738: Create a utility to backup general information
+* Feature #1006: mysql_bu.sh: disable FOREIGN_KEY_CHECKS
+* Feature #1071: mysql_bu.sh: add compression in pipeline
+* Feature #1072: mysql_bu.sh: add more compression utilities
+* Feature #1358: Default rsync timeout: increase from 300 seconds to 600
+* Feature #1379: udev initiated jobs: add support for systemd
+* Feature #1399: rsync exclude files covering /home: add Thunderbird Google mail
+* Feature #1498: rsync_bu.sh: add rsync --compress as default when source or
+      dest is remote
+* Feature #1500: rsync_bu.sh: ensure only one rsync keyword per config file
+* Task #1494: mysql_binlog_bu.sh: remove
+
+Migration notes:
+
+* In case there are any config files with multiple rsync keywords, break them up
+  into multiple config files, each with a single rsync keyword.
+* If mysql_binlog_bu.sh was in use, migrate to conventional MySQL replication.
+
+--------------------------------------------------------------------------------
+Version 1.14.0  8 Oct 2015
+
+Beta release (same changes as detailed for 1.14.1)
+
+--------------------------------------------------------------------------------
+Version 1.13.2  16 Dec 2014
+
+* Bug #741: run_subsidiary_scripts.fun or my_cat.fun: mangled message filtering
+
+Migration notes: none
+
+--------------------------------------------------------------------------------
+Version 1.13.1  3 Dec 2014
+
+* Feature #656: Create man pages for the config file formats.
+                Also done for the commands, section 8.
+* Feature #657: Move samples to /usr/share/doc/bung-<version>/examples.
+* Feature #687: Report email: add config option to control log inclusion.
+* Feature #710: Installation procedure: redraft to suit source directory
+                changes.
+
+Migration notes:
+* The tarball directory layout has been changed so upgrade must be done using
+  the changed installation commands documented in the User Guide (in the
+  tarball)
+* The default amanda_bu.sh tar directory is changed from /mnt/backup to
+  /mnt/backup/amanda
+
+--------------------------------------------------------------------------------
+Version 1.13.0  21 Nov 2014
+
+* Bug #447: ldap_bu.sh: does not work with Debian 6 ldap file locations under
+      /etc
+* Bug #457: rsync_bu.sh: feature 270 failure
+* Bug #460: postprocess_snapshot_conf.fun: converting to /dev/mapper name: does
+      not change all - to –
+* Bug #485: mysql_binlog_bu.sh: old backup files not removed after the retention
+      period
+* Bug #486: super_bu.sample.conf refers to wrong default for BUNG_ETC_DIR
+* Bug #487: cifs is only recognized when using dotted decimal notation for host
+      part
+* Bug #491: User Guide: does not describe how to configure
+      check_hotplug_usage.sh
+* Bug #537: msg.fun: problem writing to syslog: /opt/bung/lib/msg.fun: line 95:
+      /usr/bin/logger: Argument list too long
+* Bug #550: msg_on_screen: X display access failure 
+* Bug #551: ldap_bu.sh: not recoded to new initialisation procedure
+* Bug #566: Function my_cat: "<log name> is > 500000 bytes. Here are excerpts"
+      is repeated
+* Feature #446: On interrupt: generate an ERROR
+* Feature #448: rsync_bu.sh: warning not error on rsync rc 23 and only "cannot
+      delete non-empty directory"s
+* Feature #450: finalise function: sync before umount
+* Feature #458: rsync_sh: when -d and remote dest_dir, add debug message showing
+      command used to check it
+* Feature #478: Create bung+rsync restore utility
+* Feature #492: Report email and log: add summary when any warnings or errors
+* Feature #559: Log: add FQDN to initial line
+* Feature #565: Mountpoints: support mountpoints under mountpoints
+* Feature #572: Mountpoints: make warning trap for files under mountpoints
+      configurable
+* Feature #576: rsync_bu.sh config: accept SRC and DEST with embedded spaces
+* Feature #577: Mount option: accept fs_spec and fs_file with embedded
+      whitespace
+* Feature #579: rsync_bu.sh: add timeout when checking for a remote backup
+      directory
+
+Migration notes:
+* No changes required to existing config files.  Some new options available.
+
+--------------------------------------------------------------------------------
+Version 1.12.1  2 Jul 2014
+
+* Bug #442: do_mount_command function: second mount test fails when df output is line-wrapped
+* Bug #443: finalise function: W and E messages generated within finalise are not reflected in the exit return value
+* Bug #444: finalise function: dmsetup syntax error (when snapshot cannot be removed)
+* Bug #445: Sample root.exclude file: has /usr/source for /usr/src
+* Feature #140: refined following initial in-production testing
+
+Migration notes:
+* Any MySQL defaults file (default name /etc/opt/bung/mysql.cnf) with explicit
+  [mysql] and [mysqldump] sections should be changed to a single [client]
+  section as shown in /opt/bung/sample/mysql.sample.cnf.
+
+--------------------------------------------------------------------------------
+Version 1.12.0  24 Jun 2014
+
+* Feature #124: authorized_keys "command=" script
+* Feature #140: mysql_bu.sh: add binary log dump capability.  Implemented in
+  new script mysql_binlog_bu.sh
+* Bug #169: Snapshot removal: has not failed when lvremove output is "One or
+  more specified logical volume(s) not found"
+* Task #182: msg_on_screen: use yad if available
+* Bug #212: Incomplete warning: There are files under mountpoint …
+* Bug #224: finalise.fun: should not send success mail when running
+  hotplug_bu_launcher.sh
+* Bug #225: amanda_bu.sh: amclean for amcleanup
+* Feature #226: Spin down hotplug devices after unmounting
+* Bug #227: mysql_bu.sh: configuration subkeyword "retention" not effective
+* Task #230: rsync_bu.sh: add detail to error message when command to check a
+  remote backup directory fails
+* Bug #248: msg.fun: WARN: msg: problem writing to syslog:
+  /opt/bung/lib/msg.fun: line 90: /usr/bin/logger: Argument list too long
+* Feature #249: my_cat.fun: update "Here are the warning and error messages"
+  filter regex
+* Bug #253: cifs share not mounted, deleted backup
+* Feature #265: rsync_bu.sh: filter rsync log when big
+* Feature #270: rsync_bu.sh: add workaround for "rsync: make_bak_dir mkdir
+  <path> failed: File exists (17)" errors
+* Bug #272: postprocess_snapshot_conf.fun: generate sane message when Snapshot
+  configured but no VGs present
+* Bug #280: hotplug_bu.sh: send_final_notification: when an FS is mounted, "One
+  or more file systems on it are mounted" is not in the mail
+* Bug #426: ldap_bu.sh: function backup: date command: invalid format
+* Bug #441: Hotplug: advisory messages on ubuntu X desktop: do not appear
+
+Migration notes: no change since version 1.11.2
+
+--------------------------------------------------------------------------------
+Version 1.11.2  14 Feb 2014
+
+* Fixed Bug #187: /opt/bung/lib/msg.fun: line 41: local: max_logger_chars:
+  readonly variable
+* Fixed Bug #200: mysql_bu.sh: mysql warning/error classification
+* Implemented Feature #189: mysql_bu.sh:
+  address http://bugs.mysql.com/bug.php?id=68376
+* Fixed Bug #201: mysql_bu.sh: "-- Warning: Skipping the data of tablei
+  mysql.event. Specify the --events option explicitly"
+* Fixed Bug #203: mysql_bu.sh: use defaults-file instead of defaults-extra-file
+
+Migration notes (first two same as version 1.11.0):
+1 Any mysql_bu.sh configuration files not updated for version 1.10 will need
+  updating.
+2 Any notifications configured on Mount keywords will need to be moved to the
+  corresponding hotplug_bu.sh configuration file.  In case hotplug_bu.sh is not
+  used when backups are made to a hotplug device, it will need to be introduced.
+3 Any mysql.def file used and not explicitly named must be renamed as mysql.cnf.
+
+--------------------------------------------------------------------------------
+Version 1.11.1  11 Feb 2014
+
+* Fixed Bug #185: rdiff_backup.sh: ERROR: is_fs_mounted: programming error: $1 
+  is empty.
+* Fixed Bug #186: logcheck filters not effective for bung 1.11.0
+
+Migration notes (same as version 1.11.0):
+* Any mysql_bu.sh configuration files not updated for version 1.10 will need
+  updating.
+* Any notifications configured on Mount keywords will need to be moved to the
+  corresponding hotplug_bu.sh configuration file.  In case hotplug_bu.sh is not
+  used when backups are made to a hotplug device, it will need to be introduced.
+
+--------------------------------------------------------------------------------
+Version 1.11.0  11 Feb 2014
+
+* Implemented Feature #128: Support hotplug device plug in on a system other
+    than where the backup data is stored.
+* Implemented Feature #174: Snapshots: always fsck before mount
+* Fixed Bug #168: mysql_bu.sh: align documentation and code with mysqldump
+    functionality.
+* Fixed Bug #170: ext* FS mount count test for fsck: results in one fsck by
+    kernel.
+* Fixed Bug #178: msg: problem writing to syslog: /opt/bung/lib/msg.fun: line
+    84: /usr/bin/logger: Argument list too long.
+* Completed Task #179: Move notification config from the Mount keywords to
+    hotplug_bu.sh config.
+* Completed Task #180: super_bu.sh: add err_trap_subsidiary_script_conf function
+
+Migration notes:
+* Any mysql_bu.sh configuration files not updated for version 1.10 will need
+  updating.
+* Any notifications configured on Mount keywords will need to be moved to the
+  corresponding hotplug_bu.sh configuration file.  In case hotplug_bu.sh is not
+  used when backups are made to a hotplug device, it will need to be introduced.
+
+--------------------------------------------------------------------------------
+Version 1.10.2  27 Jan 2014
+
+* Fixed Bug #163: rsync_bu.sh: Invalid dest_dir_windows value 'retention=0'
+* Implemented Feature #164: mysql_bu.sh: writing to Windows: need test case
+
+Migration notes:
+* Any mysql_bu.sh configuration files not updated for version 1.10 will need
+  updating.
+
+--------------------------------------------------------------------------------
+Version 1.10.1  25 Jan 2014
+
+* Fixed Bug #162: mysql_bu.sh: /opt/bung/lib/parse_conf.fun: line 972: 
+  unparsed_str: readonly variable.
+* Implemented Feature #142: Testing: ensure there are tests with both a mount
+  and a snapshot, one with the mount first and one with the snapshot first.
+* Implemented Feature #161: Create a version file
+* Implemented Feature #160: mysql_bu.sh: add backup FS usage info after backing
+  up.
+* Implemented Feature #157: Most of the .sh files: add warning when no backup
+  is configured.
+
+Migration notes:
+* Any mysql_bu.sh configuration files not updated for version 1.10 will need
+  updating.
+
+--------------------------------------------------------------------------------
+Version 1.10  23 Jan 2014
+
+* Implemented Feature #145: mysql_bu.sh: restructure the initialise function
+  config postprocess+check to follow rsync_bu.sh model.
+* Fixed Bug #139: CIFS: invalid pathname character ":".
+* Fixed Bug #141: /opt/bung/lib/postprocess_snapshot_conf.fun: line 127: 
+  snapshot_mount_idx[i]: unbound variable.
+* Implemented Feature #138: CIFS mounts: display the mount command.
+* Fixed Bug #144: Spurious "(> 80%)" in information message "The destination
+  directory file system is 14% full (> 80%)".
+* Fixed Bug #143: Messages not displayed after "Here are the warning and error
+  messages".
+
+Migration notes:
+* mysql_bu.sh configuration syntax has changed; all mysql_bu.sh configuration
+  files will need updating.
+
+--------------------------------------------------------------------------------
+Version 1.9.2  16 Jan 2014
+
+* Fixed bug Bug #127: CIFS mount: /opt/bung/lib/postprocess_mount_conf.fun:
+  line 90: fs_spec: unbound variable
+* Fixed Bug #132: Unmount in reverse order of mounting
+* Fixed Bug #137: /opt/bung/amanda_bu.sh: line 356: do_mount_data: command not
+  found
+* Implemented Feature #134: rsync_bu.sh: remote destination directory: warn
+   when more than configurable % full
+
+--------------------------------------------------------------------------------
+Version 1.9.1  8 Jan 2014
+
+* Fixed Bug #118: Mounted file system usage high warning always generated
+* Implemented Feature #120: rsync_bu.sh: change from --delete-after to
+  --delete-during
+* Implemented Feature #121: rsync_bu.sh: retention=0: warning when backup
+  directory exists: make configurable
+* Implemented Feature #122: rsync_bu.sh: local destination directory: warn when
+  more than configurable % full
+* Implemented Feature #119: Make rsync backup directory name configurable
+* Implemented Feature #125: rsync_bu.sh: provide options sub-keyword to allow
+  entering rsync options directly
+* Implemented Feature #123: mysql_bu.sh: when the defaults-extra-file is morei
+  than root-readable, fix and warn
+* Fixed Bug #126: hotplug_bu.sh: not sending notification mails or updatingi
+  usage log
+* Evolved some of the sample *.exclude files
+
+--------------------------------------------------------------------------------
+Version 1.9  26 December 2013
+
+* Fixed Bug #106: PID file contents are truncated
+* Feature #105: rsync_bu.sh: config: --{in,ex}clude-from relative paths
+* Feature #107: Create a sample udev rule
+* Documentation #104: rsync_bu.exclude.sample.conf only has examples for Windows systems
+* Bug #110: /dev/dm* devices not supported by is_fs_mounted function
+* Bug #109: Mount mis-configuration reported as a programming error
+* Task #111: fs_spec code re-factoring
+* Feature #112: When Mount is configured and fs usage > limit: warning
+* Feature #113: rsync timeout: make configurable
+* Feature #116: rsync verbosity: make configurable
+* Bug #114: rsync_bu.sh: "_Changed and deleted files" exclusion: make more precise
+* Feature #115: amanda_bu.sh: run amcheck -k when amcheck suggests
+
+--------------------------------------------------------------------------------
+Version 1.8.2  6 December 2013
+
+* Fixed Bug #100: amanda_bu.sh: incorrectly checks whether user amanda exists (should be user backup)
+* Fixed Bug #101: rsync: change_dir#4 "/root//and" failed: No such file or directory
+* Fixed Bug #102: rdiff_backup.sh: wrongly checks for existence of remote destination directory
+* Fixed Bug #103: rsync_bu.sh: bash: -c: line 1: syntax error near unexpected token `||'
+
+--------------------------------------------------------------------------------
+Version 1.8.1  5 December 2013
+
+* Fixed Bug #98: "Invalid configuration file, '/etc/opt/bung/th_daily.amanda'
+  (does not end with a line end)" (introduced by the fix for Bug #97)
+
+--------------------------------------------------------------------------------
+Version 1.8  4 December 2013
+
+Note: 1.7 was a testing release
+
+* Fixed BLUE-1067: rsync "file has vanished" messages not errors when source
+  is not a snapshot 
+* Enhancement BLUE-1071:  implement the specification's common configuration
+  keyword "Shutdown"
+* Enhancement BLUE-1083: change default amanda_bu.sh behaviour to run amdump
+  regardless of amcheck result
+* Fixed BLUE-1085: error when run by non-root user with -c and without -l
+* Fixed BLUE-1086: test 2.2 - lsblk: command not found
+* Enhancement BLUE-1087: amanda_bu.sh: add error trap for user backup not
+  existing
+* Fixed BLUE-1093: rsync_bu.sh: message "Source directory ... was empty!" is
+  misleading
+* Enhancement BLUE-1099: rsync_bu.sh to support retention on remote systems
+* Enhancement BLUE-1101: rsync_bu.sh to default to 28 days retention
+* Enhancement BLUE-1102: enhancement: when log too big to mail, show all
+   WARN:, ERROR: and rsync error lines
+* Enhancement BLUE-1103: show command in "ERROR: Timed out waiting for the
+  mount command to finish"
+* Enhancement BLUE-1105: enhancement: when snapshots already exist, remove them
+* Fixed BLUE-1110: report mail is sometimes base64 encoded
+* Fixed BLUE-1116: rdiff-backup: programming error in error handling code when output file system is full
+* Fixed BLUE-1118: specification change: do not error trap non-existent rsync output directory
+* Fixed BLUE-1121: retention not mentioned in the rsync_bu.*sample.conf files
+* Fixed BLUE-1119: sample hotplug_bu.conf has /etc/opt/bl/bung/
+* Fixed Documentation #91: hotplug_bu.sample.conf does not example nice and ionice
+* Fixed BLUE-1120: /opt/bung/hotplug_bu.sh: line 422: hotplug_dev_email[i]: unbound variable
+* Fixed Bug #92: Test 4.6 failed: /opt/bung/rsync_bu.sh -c rsync_bu.retention.test.5
+* Fixed Bug #95: Test 2.5: duplicated warning message
+* Fixed Bug #97: When configuration file does not end with line end, last line is not read
+
+For migration:
+* Nothing required
+
+--------------------------------------------------------------------------------
+Version 1.6  3 November 2013
+
+* Fixed BLUE-1049: change find ... -exec to find ... -execdir 
+* Enhancement BLUE-1034: add rdiff-backup functionality to rsync_bu.sh
+* Fixed BLUE-1051: -l /dev/tty option generates incomplete error message 
+
+For migration:
+* Nothing required.  May want to migrate rdiff-backup jobs to rsync jobs using
+  the new bung rsync sub-keyword "retention".  This addresses the problem of 
+  rdiff-backup's corrupted metatdata
+
+--------------------------------------------------------------------------------
+Version 1.5.4  21 October 2013
+
+* Fixed BLUE-1023: increase number of umount attempts and delay between
+* Fixed BLUE-1029: $buf changed whem msg is called
+* Enhancement BLUE-1030: rdiff-backup: possible to detect backing up an empty
+  directory?
+
+For migration:
+* Nothing to do 
+
+--------------------------------------------------------------------------------
+Version 1.5.3  15 October 2013
+
+* Fixed BLUE-1011: hotplug_bu.sh: subsidiary script command is logged without
+  escaping
+* Enhancement BLUE-1015: warn when rsync "does nothing"
+* Fixed BAFI-119: /etc/opt/bung/lavenir.hotplug: Invalid keyword Missing device
+  message class (and added quotes around the keyword in that message).
+
+For migration:
+* Nothing to do 
+
+--------------------------------------------------------------------------------
+Version 1.5.2  13 October 2013    
+
+* Fixed BLUE-1000: logged command escaping turns whole command into a single
+  string
+* Fixed BAFI-114: documentation change: need udev rules for both ACTION=="add"
+  and ACTION=="change".
+* Fixed BAFI-115: ldap_bu.sh does not implement the procedure documented in the
+  WIKI.
+* Fixed BLUE-1006: should not fsck because the max mount count is 0 or -1 and
+  the mount count is more
+* Enhancement BLUE-1009: no warning on routine fsck snapshot
+
+For migration:
+* Nothing to do 
+
+--------------------------------------------------------------------------------
+Version 1.5.1  9 October 2013    
+
+* Fixed BLUE-997: update logcheck filter to suit new format syslog messages
+* Enhancement BLUE-999: add a cron job to remove log files more than three
+  months old 
+
+For migration:
+* If want to keep log files > three months, change /etc/cron.weekly/bung 
+
+--------------------------------------------------------------------------------
+Version 1.5  8 October 2013    
+
+* Fixed BLUE-992: logger "Argument list too long"
+* Fixed HOUSING-149: actual device files are /dev/mapper/* not /dev/dm-* on
+  Ubuntu 10.04
+* Enhancement: Change from <script name>.<conf name> to
+  <script name>+<conf name> in log names, PID file name, syslog entries,
+  temporary directory name
+* Enhancements (BLUE-980):
+  > Start logging: added date, changed from arguments only to full
+    command, shell escaped so can be pasted at a command prompt for testing
+  > Added "-a check" option to amanda_bu.sh to run amcheck only
+  > Added "-a force" option to amanda_bu.sh to run amdump regardless
+    of amcheck result
+  > Added -C option to check configuration file(s)
+  > Added -r option to rsync_bu.sh to run rsync with --dry-run option
+* Enhancements/fixes (BLUE-994):
+  > Restored the Mount sub-keyword, "hotplug"
+  > Clarified the help for the -u option
+  > Added keyword "Missing device message class" to hotplug_bu.sh's
+    configuration
+
+For migration:
+* Configuration file changes:
+  > hotplug_bu.sh: new optional keyword "Missing device message class"
+  > Mount keyword: new optional sub-keyword "hotplug"
+* Log file names: changed as above so the scripts will not remove old logs
+
+--------------------------------------------------------------------------------
+Version 1.4.2  4 October 2013    
+
+* Fixed BLUE-987: not skipping non /dev/sd[a-z][0-9]+ volumes when looking
+  for hotplug devices
+
+--------------------------------------------------------------------------------
+Version 1.4.1  3 October 2013    
+
+* Renamed rsync_bu.sample.exclude as rsync_bu.exclude.sample.conf
+* Removed sub-keyword "mount_delay" code and sample text (an abandoned concept)
+* Improved hotplug_bu.sh's reporting of errors found in its subsidiary scripts'
+  config files
+
+--------------------------------------------------------------------------------
+Version 1.4    2 October 2013
+
+* Fixed bug BLUE-943: msg function: xargs "argument list too long"
+* Fixed bug/enhancement BLUE-953: re-work for hotplug devices: notifications and
+  usage logging 
+* Fixed bug BLUE-962: when another instance is running, mail subject begins with
+  "(unknown organisation)"
+* Enhancement BLUE-963: add PID and PPID to start up message
+* Fixed bug BLUE-964: when deciding whether to fsck ext*, respect the local max
+  mount count when it is < bung's
+
+* Configuration file changes:
+  * Global
+      Keyword Mount
+        - [hotplug=yes|no]
+        + [notification_email=<email address>]
+  * hotplug_bu.sh
+      Keyword "Hotplug device" no longer valid    
+
+--------------------------------------------------------------------------------
+Version 1.3    22 September 2013
+
+* Fixed bug: PID file is empty when reporting another instance running
+* Fixed bug: when fs mounted elsewhere, reported as being mounted on configured
+  mountpoint
+* Enhancement: check for file system state not clean and fsck when found
+* Enhancement: install documentation
+* Enhancement: rdiff-backup: add configuration option for
+  --exclude-globbing-filelist
+* Fixed bug: when rdiff-backup return code is zero and there is output, message
+  is error; should be warning
+* Fixed bug: xargs: unmatched single quote; by default quotes are special to
+  xargs
+* Enhancement: add configuration option to run subsidiary scripts with nice and
+  ionice
+
+--------------------------------------------------------------------------------
+Version 1.2    18 September 2013
+
+* Fixed bug: "/opt/bung/rsync_bu.sh: line 138: rsync_cwrshexclude[i]: unbound
+  variable"
+* Fixed bug: "Argument list too long when calling logger"
+* Enhancement: added --timeout option to rsync command
+ Fixed bug: "Running fsck before necessary"

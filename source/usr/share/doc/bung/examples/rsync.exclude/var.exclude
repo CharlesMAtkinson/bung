@@ -1,0 +1,24 @@
+# Configuration file for rsync
+
+# * Lines beginning with # and empty lines are ignored.
+# * The format is defined in the rsync man page under:
+#   1. --exclude-from=FILE
+#   2. FILTER RULES section (search for "filter rules allow")
+
+# Exclude lines for a /var directory
+
+/crash/*
+/games/*
+/lib/lightdm/.gvfs
+/lib/nginx/proxy/*
+/lock/*
+/lost+found/*
+/run/*
+/tmp/*
+
+#/lib/sarg/Daily/*
+#/lib/sarg/Monthly/*
+#/lib/sarg/Weekly/*
+#/www/sarg/Daily/*
+#/www/sarg/Monthly/*
+#/www/sarg/Weekly/*

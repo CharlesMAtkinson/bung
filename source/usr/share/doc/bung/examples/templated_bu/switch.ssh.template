@@ -1,0 +1,22 @@
+# Template file for bung's templated_bu.sh
+
+# For backing up switches accessed via ssh
+
+# Set convenience variables
+_git_subdir = %git_root%/%hostname%
+_tftp_subdir = %tftp_root%/%hostname%
+
+# Ensure required directories
+OK rc list: ==0
+/home/nc/bin/switch.template.helper.sh -D %_git_subdir% -t %tmp_dir%
+OK rc list: ==0
+/home/nc/bin/switch.template.helper.sh -D %_tftp_subdir% -t %tmp_dir%
+
+# Copy running configuration to a TFTP server
+Timeout: 125
+/home/nc/bin/%device_type%.expect %hostname% %tftp_server%
+
+# Copy from TFTP to git
+OK regex: ^$
+cp -p %_tftp_subdir%/config %_git_subdir%/
+

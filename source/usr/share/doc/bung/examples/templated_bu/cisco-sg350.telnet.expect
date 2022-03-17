@@ -1,0 +1,30 @@
+#!/usr/bin/expect
+
+set switch_fqdn [lindex $argv 0]
+set username [lindex $argv 1]
+set password [lindex $argv 2]
+set tftp_server [lindex $argv 3]
+set timeout 120
+
+spawn telnet $switch_fqdn
+expect "User Name:"
+send "$username\n"
+expect "Password:"
+send "$password\n"
+expect "#"
+send "copy running-config tftp://$tftp_server/$switch_fqdn/config\n"
+expect {
+    -re "Copy: .* bytes copied "  {
+    } -re "Copy: .*" {
+        send_user "$expect_out(buffer)" 
+    } timeout {
+        send_user "Connection to $switch_fqdn timed out\n" 
+        exit
+    } eof {
+        send_user \
+            "Connection to $switch_fqdn failed: $expect_out(buffer)" 
+        exit
+    }   
+}
+expect "#"
+send "exit\n"

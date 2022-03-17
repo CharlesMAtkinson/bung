@@ -1,0 +1,62 @@
+.ig
+Copyright (C) 2021 Charles Atkinson
+
+Permission is granted to make and distribute verbatim copies of this
+manual provided the copyright notice and this permission notice are
+preserved on all copies.
+
+Permission is granted to copy and distribute modified versions of this
+manual under the conditions for verbatim copying, provided that the
+entire resulting derived work is distributed under the terms of a
+permission notice identical to this one.
+
+Permission is granted to copy and distribute translations of this
+manual into another language, under the above conditions for modified
+versions, except that this permission notice may be included in
+translations approved by the Free Software Foundation instead of in
+the original English.
+..
+.\" No adjustment (ragged right)
+.na\" No adjusting text
+.nh\" No hyphenation
+.TH templated_bu 8 "17 Mar 2022" "Auroville" "Version 3.2.2"
+.SH "NAME"
+templated_bu \- run commands in a template
+.SH SYNOPSIS
+\fbtemplated_bu 
+\fB-c\~\fIconf 
+\fR[\fB-C\fR] 
+\fR[\fB-d\fR] 
+\fR[\fB-h\fR] 
+\fR[\fB-L\~\fIlog_dir\fR] 
+\fR[\fB-l\~\fIlog_file\fR] 
+\fR[\fB-o\~\fIorganisation\fR] 
+\fR[\fB-p\~\fIpath\fR] 
+\fR[\fB-s\fR] 
+\fR[\fB-t\~\fItmp_dir\fR] 
+\fR[\fB-v\fR] 
+\fR[\fB-w\fR]
+.SH DESCRIPTION
+.nh\" No hyphenation
+templated_bu runs commands defined in a template file.
+The template file is documented in templated_file(8).
+.SH OPTIONS
+.TP
+All options are bung common options, documented in bung-common (5).
+.SH ENVIRONMENT
+Environment variables are described in bung-common (5).
+.SH FILES
+Default directories are described in bung-common (5).
+.SH EXAMPLES
+-
+.SH AUTHOR
+Charles Atkinson bung@charlesmatkinson.org
+.SH SEE ALSO
+\fBbung-common\fR(5\~and\~8),
+\fBhotplug_bu\fR(5\~and\~8),
+\fBtemplated_bu\fR(5),
+\fBtemplate_file\fR(5),
+\fBsuper_bu\fR(5\~and\~8),
+.br
+The bung user guide,
+normally installed in /usr/share/bung/doc

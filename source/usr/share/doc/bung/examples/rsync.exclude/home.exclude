@@ -1,0 +1,43 @@
+# Configuration file for rsync
+
+# * Lines beginning with # and empty lines are ignored.
+# * The format is defined in the rsync man page under:
+#   1. --exclude-from=FILE
+#   2. FILTER RULES section (search for "filter rules allow")
+
+# Exclusion lines for a /home directory
+
+/lost+found/
+/*/.adobe/Flash_Player/AssetCache/
+/*/.cache/
+/*/.compiz-1/session/
+/*/.config/nautilus/saved-session-*
+/*/.Dropbox/.dropbox.cache/
+/*/.gvfs/
+/*/.local/
+/*/.macromedia/
+/*/.metacity/sessions/
+/*/.mozilla/firefox/*/Cache/
+/*/.mozilla/firefox/*/Cache.Trash*/
+/*/.mozilla/firefox/Crash Reports/
+/*/.opera/cache/
+/*/.thumbnails/
+/*/.thunderbird/**/Bin
+/*/.thunderbird/**/Bin.*
+/*/.thunderbird/*/Cache/
+/*/.thunderbird/Crash Reports/
+/*/.thunderbird/*/global-messages-db.sqlite
+/*/.thunderbird/*/ImapMail/imap.gmail*.com/*
+/*/.thunderbird/*/ImapMail/imap.googlemail*.com/*
+/*/.thunderbird/**.msf
+/*/.thunderbird/**/Spam
+/*/.thunderbird/**/Spam.*
+/*/.thunderbird/**/Trash
+/*/.thunderbird/**/Trash.*
+/*/.Trash*/
+/*/Trash*/
+/*/urlclassifier3.sqlite
+/*/.VirtualBox/
+/*/.VirtualBox/**.vdi
+/*/VirtualBox VMs/**.vdi
+/*/xapiandb

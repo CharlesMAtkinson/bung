@@ -1,0 +1,387 @@
+#! /bin/bash
+
+# Copyright (C) 2021 Charles Atkinson
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+
+# Purpose: 
+#   Checks usage of hotplug storage devices:
+
+# Usage: 
+#   See usage.fun or use -h option.
+
+# Programmers' notes: error and trap handling: 
+#   * All errors are fatal and finalise() is called.
+#   * At any time, a trapped event may transfer control to finalise().
+#   * To allow finalise() to tidy up before exiting, changes that need to be
+#     undone are noted with global variables named <change name>_flag and the
+#     data required to undo those changes is kept in global variables.
+#   * finalise() uses the same functions to undo the changes as are used when
+#     they are undone routinely.
+#   * $finalising_flag is used to prevent recursive calls when errors are
+#     encountered while finalise() is running,
+
+# Programmers' notes: variable names and values
+#   * Directory names: *_dir.  Their values should not have a trailing /
+#   * File names: *_fn
+#   * Logicals: *_flag containing values $true or $false.
+#     The $true and $false values allow "if [[ $debugging_flag ]]"
+#   * $buf is a localised scratch buffer
+
+# Programmers' notes: file descriptor usage
+#   0 (stdin)- not changed
+#   1 (stdout)- not changed except when logging request when redirected to log
+#   2 (stderr)- not changed except when logging request when redirected to log
+#   3 - used for reading the configuration file
+#   9 - used for locking the PID file
+
+# Programmers' notes: bash library
+#   * May be changed by setting environment variable BUNG_LIB_DIR
+export BUNG_LIB_DIR=${BUNG_LIB_DIR:-/usr/lib/bung}
+source "$BUNG_LIB_DIR/version.scrippet" || exit 1
+
+# Programmers' notes: function call tree
+#    +
+#    |
+#    +-- initialise
+#    |   |
+#    |   +-- usage
+#    |   |
+#    |   +-- parse_conf
+#    |   |
+#    |   +-- err_trap_email_for_report
+#    |   |
+#    |   +-- err_trap_post_hook_conf
+#    |   |
+#    |   +-- err_trap_pre_hook_conf
+#    |   |
+#    |   +-- err_trap_shutdown
+#    |   |
+#    |   +-- postprocess_org_name_conf
+#    |   |
+#    |   +-- do_pid
+#    |
+#    +-- run_subsidiary_scripts
+#    |
+#    +-- finalise
+#
+# Utility functions called from various places:
+#     ck_file ck_uint err_trap_uint fct msg
+
+# Function definitions in alphabetical order.  Execution begins after the last function definition.
+
+source "$BUNG_LIB_DIR/ck_file.fun" || exit 1
+source "$BUNG_LIB_DIR/ck_uint.fun" || exit 1
+source "$BUNG_LIB_DIR/do_pid.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_uint.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_email_for_report.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_post_hook_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_pre_hook_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_shutdown.fun" || exit 1
+source "$BUNG_LIB_DIR/fct.fun" || exit 1
+source "$BUNG_LIB_DIR/finalise.fun" || exit 1
+
+#--------------------------
+# Name: initialise
+# Purpose: sets up environment and parses command line
+#--------------------------
+function initialise {
+
+    # Declare locals
+    # Configure shell environment
+    # Initialise envars, globals and locals
+    # Parse command line
+    # Check the config file
+    # Check the PID directory
+    # Set up logging
+    # Set traps
+    # Create and lock the PID file
+    # Create temporary directory
+    source "$BUNG_LIB_DIR/initialise_1.scrippet" || exit 1
+    
+    # Parse configuration file
+    # ~~~~~~~~~~~~~~~~~~~~~~~~
+    emsg=
+    # Note: ensure a space on both sides of each string in the arrays
+    local -A keyword_validation
+    keyword_validation[name]=' 
+        checkhotplugusage 
+        emailforreport 
+        logretention 
+        organisationname 
+        post_hook 
+        pre_hook 
+        shutdown 
+    '
+    keyword_validation[repeat invalid]=' 
+        checkhotplugusage 
+        organisationname 
+        post_hook 
+        pre_hook 
+        shutdown 
+    '
+    local +r keyword_validation
+    parse_conf "$conf_fn"
+    [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
+
+    # Postprocess and error trap the configuration
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    # Email for report
+    if [[ ! $subsidiary_mode_flag ]]; then
+        postprocess_email_for_report
+        err_trap_email_for_report
+    fi
+
+    # Log retention
+    err_trap_uint "$log_retention" "Invalid log retention value"
+
+    # Organisation name
+    postprocess_org_name_conf "${org_name:-}" "${org_name_optarg:-}" "$opt_o_flag"
+
+    # Post-hook
+    err_trap_post_hook_conf
+
+    # Pre-hook
+    err_trap_pre_hook_conf
+
+    # Shutdown
+    err_trap_shutdown
+
+    [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
+
+    # Finish if -C option (check the configuration)
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [[ $conf_check_flag ]] \
+        && { msg I "Configuration check OK for $conf_fn"; finalise 0; }
+
+    [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
+ 
+    # Finish if -C option (check the configuration)
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [[ $conf_check_flag ]] \
+        && { msg I "Configuration check OK for $conf_fn"; finalise 0; }
+ 
+    # Create and lock the PID file
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    do_pid "$(printf '%q ' "${args[@]}")"
+
+    fct "${FUNCNAME[0]}" 'returning'
+}  # end of function initialise
+
+source "$BUNG_LIB_DIR/msg.fun" || exit 1
+source "$BUNG_LIB_DIR/my_cat.fun" || exit 1
+source "$BUNG_LIB_DIR/parse_conf.fun" || exit 1
+
+#--------------------------
+# Name: ck_hotplug_usage
+# Purpose: checks hotplug backup storage device usage
+# Arguments: none
+# Global variable usage:
+#   Read:
+#       * ck_hotplug_usage_org[]
+#       * ck_hotplug_usage_email[]
+#       * ck_hotplug_usage_max_backup_age[]
+#       * ck_hotplug_usage_max_device_change_days[]
+# Return code: always 0; does not return on error
+#--------------------------
+function ck_hotplug_usage {
+    fct "${FUNCNAME[0]}" 'started'
+    local array buf date_now hotplug_usage_log_fn i last_line_flag last_serial msg msgs serial
+    local usage_org usage_emails
+    local usage_max_backup_age_days usage_max_backup_age_secs
+    local usage_max_device_change_days usage_max_device_change_secs
+
+    # Nothing to do?
+    # ~~~~~~~~~~~~~~
+    if ((ck_hotplug_usage_idx==-1)); then
+        msg I "No 'Check organisation name' configured in $conf_fn"
+        return
+    fi
+
+    # For each organisation
+    # ~~~~~~~~~~~~~~~~~~~~~
+    date_now=$(date +%s)
+    for ((i=0;i<=ck_hotplug_usage_idx;i++))
+    do
+        msgs=
+        usage_org=${ck_hotplug_usage_org[i]}
+        msg I "Checking $usage_org"
+        hotplug_usage_log_fn=$BUNG_LOG_DIR/hotplug/$usage_org
+        buf=$(ck_file "$hotplug_usage_log_fn" f:r 2>&1)
+        if [[ $buf != '' ]]; then
+            msg W "Hotplug usage log: $buf"
+            continue
+        fi
+
+        # For each line of the log
+        # ~~~~~~~~~~~~~~~~~~~~~~~~
+        usage_max_backup_age_days=${ck_hotplug_usage_max_backup_age[i]}
+        usage_max_backup_age_secs=$((usage_max_backup_age_days*24*60*60))
+        usage_max_device_change_days=${ck_hotplug_usage_max_device_change_days[i]}
+        usage_max_device_change_secs=$((usage_max_device_change_days*24*60*60))
+        last_line_flag=$true
+        while read -r date serial
+        do
+            # Last backup too long ago?
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~
+            if [[ $last_line_flag ]]; then    # Last line of log only
+                last_line_flag=$false
+                if ((date_now-$(date --date=$date +%s)>usage_max_backup_age_secs)); then
+                    msg="The last backup of $usage_org was $usage_max_backup_age_days or more days ago on $date"
+                    msg W "$msg"
+                    msgs+=$msg_lf$msg
+                fi
+                last_serial=$serial
+            else
+                if [[ $last_serial != $serial ]]; then    # Last hotplug device change
+                    if ((date_now-$(date --date=$date +%s)>usage_max_device_change_secs)); then
+                        msg="The last backup of $usage_org on a different hotplug device was $usage_max_device_change_days or more days ago on $date"
+                        msg W "$msg"
+                        msgs+=$msg_lf$msg
+                    fi
+                    break
+                fi
+            fi
+        done <<< "$(tac "$hotplug_usage_log_fn")"
+
+        # Final messaging for this organisation
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        if [[ $msgs = '' ]]; then
+            msg I 'No problems found'
+        else
+            echo "$msgs" \
+                | mailx -s 'Problems detected with backup to hotplug storage' \
+                     ${ck_hotplug_usage_email[i]}
+        fi
+    done
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function ck_hotplug_usage
+
+#--------------------------
+# Name: parse_conf_ck_hotplug_usage
+# Purpose:
+#   Parses a "Check hotplug usage" line from the configuration file
+#   Note: does not error trap sub-values
+# Arguments:
+#   $1 - the keyword as read from the configuration file (not normalised)
+#   $2 - the value from the configuration file
+#   $3 - the configuration file line number
+# Global variable usage:
+#   Read:
+#       false
+#       line_n
+#       true
+#   Set:
+#       ck_hotplug_usage_idx incremented
+#       pc_emsg appended with any error message
+# Output: none except via function fct
+# Return value:
+#   0 when no error detected
+#   1 when an error is detected
+#--------------------------
+function parse_conf_ck_hotplug_usage {
+    fct "${FUNCNAME[0]}" "started with keyword: ${1:-}, value:${2:-}"
+    local buf initial_pc_emsg my_rc
+
+    # Parse arguments
+    # ~~~~~~~~~~~~~~~
+    if [[ ${3:-} != '' ]]; then
+        msg="Programmming error: ${FUNCNAME[0]} called with a third argument"
+        msg E "$msg (args: $*)"
+    fi
+    local -r keyword=$1
+    unparsed_str=$2
+
+    # Initialise
+    # ~~~~~~~~~~
+    ck_hotplug_usage_org[++ck_hotplug_usage_idx]=
+    ck_hotplug_usage_email[ck_hotplug_usage_idx]=
+    ck_hotplug_usage_max_backup_age[ck_hotplug_usage_idx]=
+    ck_hotplug_usage_max_device_change_days[ck_hotplug_usage_idx]=
+    ck_hotplug_usage_org[ck_hotplug_usage_idx]=
+    initial_pc_emsg=$pc_emsg
+
+    # Parse any subkeywords
+    # ~~~~~~~~~~~~~~~~~~~~~
+    # Syntax:
+    # Check hotplug usage = Organisation=<organisation name>
+    #     [Email=<email address>] [MaxBackupAge=<days>]
+    #     [MaxDeviceChangeDays=<days>]
+    # Note: ensure a space on both sides of each string in the arrays
+    local -A subkey_validation
+    subkey_validation[name]='
+        email
+        maxbackupage 
+        maxdevicechangedays 
+        organisation 
+    '
+    subkey_validation[value required]='
+        email
+        maxbackupage 
+        maxdevicechangedays 
+        organisation 
+    '
+    subkey_validation[value invalid]=' '
+    local +r subkey_validation
+    while [[ $unparsed_str != '' ]]
+    do
+       parse_conf_subkey_value "${FUNCNAME[0]}" $line_n
+    done
+
+    # Remove any leading "," from the email(s) value
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    ck_hotplug_usage_email[ck_hotplug_usage_idx]=${ck_hotplug_usage_email[ck_hotplug_usage_idx]:1}
+
+    # Set defaults if not configured
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    if [[ ${ck_hotplug_usage_email[ck_hotplug_usage_idx]} = '' ]]; then
+        ck_hotplug_usage_email[ck_hotplug_usage_idx]=root
+    fi
+    if [[ ${ck_hotplug_usage_max_backup_age[ck_hotplug_usage_idx]} = '' ]]; then
+        ck_hotplug_usage_max_backup_age[ck_hotplug_usage_idx]=3
+    fi
+    if [[ ${ck_hotplug_usage_max_device_change_days[ck_hotplug_usage_idx]} = '' ]]; then
+        ck_hotplug_usage_max_device_change_days[ck_hotplug_usage_idx]=3
+    fi
+
+    # Error trap Organisation not given
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    if [[ ${ck_hotplug_usage_org[ck_hotplug_usage_idx]} = '' ]]; then
+        pc_emsg+=$msg_lf"Organisation sub-keyword is required (line $line_n)"
+    fi
+
+    [[ $pc_emsg = $pc_emsg ]] && my_rc=0 || my_rc=1
+    fct "${FUNCNAME[0]}" "returning with rc $my_rc"
+    return $my_rc
+}  # end of function parse_conf_ck_hotplug_usage
+
+source "$BUNG_LIB_DIR/parse_conf_subsidiaryscript.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_email_for_report.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_org_name_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/run_pre_hooks.fun" || exit 1
+source "$BUNG_LIB_DIR/usage.fun" || exit 1
+
+#--------------------------
+# Name: main
+# Purpose: where it all happens
+#--------------------------
+[[ ${BUNG_COMPGEN_DIR:-} != '' ]] && compgen -v >> $BUNG_COMPGEN_DIR/initial.vars
+initialise "${@:-}"
+((pre_hook_idx>-1)) && run_pre_hooks
+ck_hotplug_usage
+finalise 0

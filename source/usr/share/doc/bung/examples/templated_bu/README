@@ -1,0 +1,13 @@
+Expect scripts
+==============
+
+The supplied examples can be symlinked to match more model names, example
+
+lrwxrwxrwx 1 nc nc 25 Feb 11 15:49 ./cisco-sf300.telnet.expect -> cisco-sg350.telnet.expect
+lrwxrwxrwx 1 nc nc 22 Feb 11 11:23 ./cisco-sg300.ssh.expect -> cisco-sg350.ssh.expect
+lrwxrwxrwx 1 nc nc 25 Feb 11 11:25 ./cisco-sg300.telnet.expect -> cisco-sg350.telnet.expect
+lrwxrwxrwx 1 nc nc 22 Feb 11 11:24 ./cisco-srw.ssh.expect -> cisco-sg350.ssh.expect
+lrwxrwxrwx 1 nc nc 25 Feb 11 11:58 ./cisco-srw.telnet.expect -> cisco-sg350.telnet.expect
+lrwxrwxrwx 1 nc nc 15 Dec 29 14:10 ./dggs1526.expect -> dgfs4526.expect
+lrwxrwxrwx 1 nc nc 15 Dec 29 14:12 ./dggs4524.expect -> dgfs4526.expect
+

@@ -1,0 +1,310 @@
+#! /bin/bash
+
+# Copyright (C) 2021 Charles Atkinson
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+
+# Purpose:
+#   * Launches hotplug_bu as an at job which fulfils udev's requirement that
+#     commands it runs return quickly.
+#   * Reads the same conffile as read by hotplug_bu
+#   * Intended to be run by udev on a hotplug backup storage device
+#     plug in event.
+
+# Usage:
+#   See the usage function below or use -h option
+
+# Programmers' notes: error and trap handling:
+#   * All errors are fatal and finalise() is called.
+#   * At any time, a trapped event may transfer control to finalise().
+#   * To allow finalise() to tidy up before exiting, changes that need to be
+#     undone are noted with global variables named <change name>_flag and the
+#     data required to undo those changes is kept in global variables.
+#   * finalise() uses the same functions to undo the changes as are used when
+#     they are undone routinely.
+#   * $finalising_flag is used to prevent recursive calls when errors are
+#     encountered while finalise() is running,
+
+# Programmers' notes: variable names and values
+#   * Directory names: *_dir.  Their values should not have a trailing /
+#   * File names: *_fn
+#   * Logicals: *_flag containing values $true or $false.
+#     The $true and $false values allow "if [[ $debugging_flag ]]"
+#   * $buf is a localised scratch buffer
+
+# Programmers' notes: file descriptor usage
+#   0 (stdin)- not changed
+#   1 (stdout)- not changed except when logging request when redirected to log
+#   2 (stderr)- not changed except when logging request when redirected to log
+#   3 - used for reading the configuration file
+#   9 - used for locking the PID file
+
+# Programmers' notes: bash library
+#   * May be changed by setting environment variable BUNG_LIB_DIR
+export BUNG_LIB_DIR=${BUNG_LIB_DIR:-/usr/lib/bung}
+source "$BUNG_LIB_DIR/version.scrippet" || exit 1
+
+# Programmers' notes: maximum line length ruler
+# -------+---------+---------+---------+---------+---------+---------+---------+
+#        10        20        30        40        50        60        70        80
+
+# Programmers' notes: function call tree
+#    +
+#    |
+#    +-- initialise
+#    |   |
+#    |   +-- usage
+#    |   |
+#    |   +-- parse_conf
+#    |   |   |
+#    |   |   +-- parse_conf_subsidiary_script
+#    |   |
+#    |   +-- err_trap_email_for_report
+#    |   |
+#    |   +-- err_trap_for_hotplug_device_umount_notification
+#    |   |
+#    |   +-- err_trap_post_hook_conf
+#    |   |
+#    |   +-- err_trap_pre_hook_conf
+#    |   |
+#    |   +-- postprocess_email_for_report
+#    |   |
+#    |   +-- postprocess_org_name_conf
+#    |   |
+#    |   +-- do_pid
+#    |
+#    +-- launcher
+#    |
+#    +-- finalise
+#
+# Utility functions called from various places:
+#     ck_file ck_uint err_trap_uint fct msg parse_conf_subkey parse_conf_word
+
+# Function definitions in alphabetical order.  Execution begins after the last function definition.
+
+source "$BUNG_LIB_DIR/ck_file.fun" || exit 1
+source "$BUNG_LIB_DIR/ck_uint.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_email_for_report.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_org_name_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/do_pid.fun" || exit 1
+source "$BUNG_LIB_DIR/do_umounts.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_uint.fun" || exit 1
+
+#--------------------------
+# Name: err_trap_hotplug_files_and_dirs
+# Purpose: error traps hotplug-specific files and directories
+# Arguments: none
+# Return code: always 0; does not return on error
+#--------------------------
+function err_trap_hotplug_files_and_dirs {
+    fct "${FUNCNAME[0]}" started
+    local buf
+
+    buf=$(ck_file "$command_to_run" f:rx 2>&1)
+    [[ $buf != '' ]] && msg E "Command to run: $buf"
+
+    fct "${FUNCNAME[0]}" returning
+    return
+}  # end of function err_trap_hotplug_files_and_dirs
+
+source "$BUNG_LIB_DIR/err_trap_email_for_report.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_post_hook_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_pre_hook_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/fct.fun" || exit 1
+source "$BUNG_LIB_DIR/finalise.fun" || exit 1
+
+#--------------------------
+# Name: initialise
+# Purpose: sets up environment and parses command line
+#--------------------------
+function initialise {
+    local -r allowed_runlevels='2 3 4 5'
+
+    # Early exit if system is in not in an allowed run level
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    buf=$(runlevel)
+    runlevel=${buf#* }
+    [[ ! " $allowed_runlevels " =~ $runlevel ]] && exit 0
+
+    # Global initialisation
+    # ~~~~~~~~~~~~~~~~~~~~~
+    # Declare locals
+    # Configure shell environment
+    # Initialise envars, globals and locals
+    # Parse command line
+    # Check the config file
+    # Check the PID directory
+    # Set up logging
+    # Set traps
+    # Create and lock the PID file
+    # Create temporary directory
+    source "$BUNG_LIB_DIR/initialise_1.scrippet" || exit 1
+
+    # Parse configuration file
+    # ~~~~~~~~~~~~~~~~~~~~~~~~
+    # The valid keywords are the same as hotplug_bu uses so this script can use the
+    # same configuration file.
+    emsg=
+    # Note: ensure a space on both sides of each string in the arrays
+    local -A keyword_validation
+    keyword_validation[name]=' 
+        emailforreport 
+        hotplugdevice 
+        logretention 
+        mount 
+        organisationname 
+        post_hook 
+        pre_hook 
+        shutdown 
+        snapshot 
+        subsidiaryscript 
+    ' 
+    keyword_validation[repeat invalid]=' 
+        hotplugdevice  
+        logretention 
+        organisationname 
+        shutdown 
+    '
+    local +r keyword_validation
+    parse_conf "$conf_fn"
+    shutdown=    # Disable shutdown in case configured
+
+    # Postprocess and error trap the configuration
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Essentially the same as done by hotplug_bu (because designed to use
+    # the same configuration file) but only error trap values this script will
+    # use.
+
+    # Email for report
+    # ~~~~~~~~~~~~~~~~
+    postprocess_email_for_report
+
+    # Log retention
+    err_trap_uint "$log_retention" "Invalid log retention value"
+
+    # Organisation name
+    postprocess_org_name_conf "${org_name:-}" "${org_name_optarg:-}" "$opt_o_flag"
+
+    # Post-hook
+    err_trap_post_hook_conf
+
+    # Pre-hook
+    err_trap_pre_hook_conf
+
+    [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
+
+    # Finish if -C option (check the configuration)
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [[ $conf_check_flag ]] \
+        && { msg I "Configuration check OK for $conf_fn"; finalise 0; }
+
+    # Create and lock the PID file
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    do_pid "$(printf '%q ' "${args[@]}")"
+
+    err_trap_hotplug_files_and_dirs
+
+    fct "${FUNCNAME[0]}" returning
+}  # end of function initialise
+
+source "$BUNG_LIB_DIR/msg.fun" || exit 1
+source "$BUNG_LIB_DIR/my_cat.fun" || exit 1
+source "$BUNG_LIB_DIR/parse_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/parse_conf_hotplugdevice.fun" || exit 1
+source "$BUNG_LIB_DIR/parse_conf_subsidiaryscript.fun" || exit 1
+source "$BUNG_LIB_DIR/parse_conf_word.fun" || exit 1
+
+#--------------------------
+# Name: launcher
+# Purpose:
+#   Launches the script named on the command line
+# Arguments:
+#   $* - arguments for the
+#        (The ones this script was called with after removing the first)
+# Global variable usage:
+#   Read: command_to_run
+# Output: none
+# Return value: 1 when an error is detected, 0 otherwise
+#--------------------------
+function launcher {
+    fct "${FUNCNAME[0]}" started
+    local buf out_data out_fn
+    local -r at_out_regex='warning: commands will be executed using /bin/sh.job [[:digit:]]+ at [[:alpha:]]{3} [[:alpha:]]{3}[[:digit:]: ]+$'
+    local -r delay=1
+
+    # Run the requested command as an at job
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Using an at job allows the same mechanism to be used under all init
+    # systems, including systemd.
+    out_fn=$tmp_dir/${command_to_run##*/}.out
+    msg I "Running as at job: $(printf '%q ' "$command_to_run" "$@")"
+    (
+        exec >>"$out_fn"
+        exec 2>>"$out_fn"
+        echo "$command_to_run" "$@" | at now
+    )
+    sleep $delay
+    out_dat=$(cat "$out_fn" 2>&1)
+    if [[ ! $out_dat =~ $at_out_regex ]]; then
+        msg E "Unexpected output from at:$'\n'$out_dat"
+    fi
+
+    fct "${FUNCNAME[0]}" returning
+    return 0
+}  # end of function launcher
+
+#--------------------------
+# Name: usage
+# Purpose: prints usage message
+#--------------------------
+function usage {
+echo "${FUNCNAME[0]} started"
+    fct "${FUNCNAME[0]}" started
+
+    echo "usage: $script_name command [args]" >&2
+    if [[ ${1:-} != 'verbose' ]]; then
+        echo "(use -h for help)" >&2
+    else
+        echo "  where:
+    command  is the script/executable to run, normally hotplug_bu
+        If command does not begin with /, it is taken as relative to
+        \$BUNG_BIN_DIR, normally /usr/bin
+    args  are the command's arguments and the options used by $script_name:
+        -c conf [-d] [-h] [-l log] [-o org] [-p path] [-u] [-v]
+            -c configuration file name
+            -d debugging on
+            -h prints this help and exits
+            -l log file.  Use /dev/tty to log to screen
+            -o organisation name
+            -u called by udev.  Errors if the hotplug device does not exist
+            -p path.  Replace the PATH environment variable (default $PATH)
+            -v prints the script's version and exits
+" >&2
+    fi
+
+    fct "${FUNCNAME[0]}" returning
+}  # end of function usage
+
+#--------------------------
+# Name: main
+# Purpose: where it all happens
+#--------------------------
+[[ ${BUNG_COMPGEN_DIR:-} != '' ]] && compgen -v >> $BUNG_COMPGEN_DIR/initial.vars
+command_to_run=${1:-}
+[[ $command_to_run != -h ]] && shift
+initialise "${@:-}"
+((pre_hook_idx>-1)) && run_pre_hooks
+launcher "${@:-}"
+finalise 0

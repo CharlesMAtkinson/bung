@@ -1,0 +1,462 @@
+.ig
+Copyright (C) 2022 Charles Atkinson
+
+Permission is granted to make and distribute verbatim copies of this
+manual provided the copyright notice and this permission notice are
+preserved on all copies.
+
+Permission is granted to copy and distribute modified versions of this
+manual under the conditions for verbatim copying, provided that the
+entire resulting derived work is distributed under the terms of a
+permission notice identical to this one.
+
+Permission is granted to copy and distribute translations of this
+manual into another language, under the above conditions for modified
+versions, except that this permission notice may be included in
+translations approved by the Free Software Foundation instead of in
+the original English.
+..
+.\" No adjustment (ragged right)
+.na
+.TH bung-common 5 "17 Mar 2022" "Auroville" "Version 3.2.2"
+.SH NAME
+bung \- common configuration for most bung scripts
+.SH SYNOPSIS
+\fBkeyword\~=\~\fR[\fBkey_value\fR\~...] [\fBsub_keyword\fR=\fIsub_key_value\fR\~...]
+or
+.br
+\fBkeyword\~=\~[\fBsub_keyword\fR=\fIsub_key_value\fR\~...] \fR[\fBkey_value\fR\~...]
+.SH DESCRIPTION
+This man page describes the bung scripts' configuration file format
+and common keywords
+accepted by most of the scripts.
+Each script's specific keywords and a list of which
+keywords it accepts are described in its man 5 page.
+.SH OPTIONS (file format)
+.IP * 4
+.nh
+Lines beginning with #, empty lines and lines containing only spaces and tabs are ignored.
+.nh
+.IP * 4
+Line syntax is:
+.RS
+.HP
+.nh
+\fBkeyword\~=\~\fR[\fBkey_value\fR\~...] [\fBsub_keyword\fR=\fIsub_key_value\fR\~...]
+.br
+or
+.br
+\fBkeyword\~=\~[\fBsub_keyword\fR=\fIsub_key_value\fR\~...] \fR[\fBkey_value\fR\~...]
+.RE
+.IP * 4
+Key values are position dependent; sub-keywords may be given in any order.
+.IP * 4
+When sub_keywords are repeated, the last one's sub_key_value is effective.
+.IP * 4
+.nh
+Key and sub-key values may be enclosed in double quotes.
+In case they contain spaces or tabs they must be enclosed in double quotes.
+Double quote characters within values must be backslash escaped.
+For example:
+.RS
+.HP
+.nh
+Organisation = "Al \\"Scarface\\" Capone"
+.RE
+.IP * 4
+.nh
+Outside key and sub-key values:
+.IP "" 4
+* Any number of spaces and tabs can be used around "=" characters.
+.IP "" 4
+* One or more spaces or tabs are required between key values, sub-keywords
+and sub-keyword values.
+.IP "" 4
+For example, these are equivalent:
+.RS
+.HP
+User name = sampan type=good class=best
+.HP
+User name=sampan    type = good    class = best
+.RE
+.IP * 4
+Keywords are case-insensitive and internal spaces and tabs are ignored.
+.IP "" 4
+For example, these are equivalent:
+UserName, User name, username
+.SH OPTIONS (common keywords)
+Keywords may be given in any order.
+Except where noted ("May be used multiple times"),
+keywords may only be used once in each configuration file.
+Here are the common keywords in alphabetical order.
+.
+.TP
+Email for report
+.RS
+.nh
+\fBEmail for report = \fIemail_address
+\fR[\fBmsg_level = \fI level\fR]
+\fR[\fBno_log\fR]
+.P
+Optional; default root with msg_level I (information) and include the log.
+.br
+May appear several times
+.br
+Ignored when running in subsidiary mode.
+.P
+\fBemail_address\fR is, er, an email address
+.P
+\fBmsg_level\fR sets the minimum message level at which an email should be sent.
+.br
+\fBI\fR for information (default).  Always send the report email.
+.br
+\fBW\fR for warning.
+Send the report email only when there is one or more
+warning or error messages.
+.br
+\fBE\fR for error.
+Send the report email only when there is one or more
+error messages.
+.P
+\fBno_log\fR tells bung not to include the log in the report email.
+.RE
+.
+.TP
+Log retention
+.RS
+.nh
+\fBLog retention = \fIdays
+.P
+Optional; default 28 days log retention
+.RE
+.
+.TP
+Max memory size
+.RS
+.nh
+\fBMax memory size = unlimited|\fIsize
+.P
+Optional; default no change to existing max memory size limit
+.P
+\fIsize\fR must be an unsigned integer.
+It is in units of 1 kibibyte (1024 bytes) as documented on the \fBbash\fR(1) man page in the ulimit section.
+.RE
+.
+.TP
+Mount
+.RS
+.nh
+\fBMount = fs_spec fs_file
+\fR[\fBignore_already_mounted\fR]
+\fR[\fBignore_files_under_fs_file\fR]
+\fR[\fBno_fsck\fR]
+\fR[\fBoptions=\fIoptions\fR]
+.P
+Optional; no default; may appear several times
+.P
+\fBfs_spec\fR is as described in the fstab man page.  It is widely known as the
+device or special file
+.P
+\fBfs_file\fR is as described in the fstab man page.  It is widely known as the
+mountpoint
+.P
+\fBignore_already_mounted\fR tells bung not to generate a warning
+when fs_spec is already mounted.
+Useful when a file system in an rsync "whole tree" source tree is not a snapshot, for example when mounting /boot on /mnt/snap-root/boot
+.P
+\fBignore_files_under_fs_file\fR tells bung not to generate a warning
+when there are files under the fs_file mountpoint
+.P
+\fBno_fsck\fR tells bung not to fsck the file system.
+.br
+On ext2/3/4 file systems, bung normally runs fsck
+when the state is not clean,
+when the mount count is high
+or when the time since last fsck is long
+.br
+On JFS file systems, bung normally runs fsck unconditionally
+.P
+\fBoptions\fR is as described in the mount man page
+.P
+Examples
+.br
+\~\~\~\~Mount = LABEL=backup /mnt/backup
+.br
+\~\~\~\~Mount = /dev/foo-usb-hdd /mnt/offsite-foo
+.br
+\~\~\~\~Mount = //192.168.1.1/foo /mnt/foo
+options=credentials=/etc/bung/foo.credentials
+.br
+\~\~\~\~Mount = UUID=548ecadb-8507-4c0b-9f03-84e25238d7f1 /mnt/backup
+.br
+\~\~\~\~Mount = /dev/sda6 /mnt/backup
+.br
+\~\~\~\~Mount = bar:/home /mnt/bar/home
+.RE
+.
+.TP
+Number of open files
+.RS
+.nh
+\fBNumber of open files = unlimited|\fIsize
+.P
+Optional; default no change to existing maximum number of open file descriptors limit
+.P
+\fIsize\fR must be an unsigned integer.
+It is in units of 1 kibibyte (1024 bytes) as documented on the \fBbash\fR(1) man page in the ulimit section.
+.RE
+.
+.TP
+Organisation name
+.RS
+.nh
+\fBOrganisation name = \fIorganisation_name\fR
+.P
+Required when not in subsidiary mode and not given by command line option -o
+.P
+Overridden by command line option -o
+.P
+May not contain a "/"
+.P
+Note: the organisation name appears in report emails' subjects so you may like
+to make it short and meaningful
+.RE
+.
+.TP
+Post-hook
+.RS
+.nh
+\fBPost-hook =
+\fR[\fBtimeout=\fIduration\fR]
+\fR[\fBtimeout_msgclass=\fImsgclass\fR]
+\fR[\fBrun=\fIcondition\fR]
+\fIcommand\fR
+.P
+Optional; no default; may appear several times
+.P
+\fBtimeout\fR specifies the maximum time allowed for the command to return
+before exiting with an error.
+.br
+\fIduration\fR is a floating point number with an optional suffix:
+.br
+\fBs\fR for seconds (default)
+.br
+\fBm\fR for minutes
+.br
+\fBh\fR for hours
+.br
+\fBd\fR for days
+.br
+Default: 10 (allow the post-hook command 10 seconds to run)
+.P
+\fBtimeout_msgclass\fR specifies the class of the message to be generated
+when the command times out.
+.br
+\fImsgclass\fR must be I, W or E for information, warning or error.
+.br
+Default: E (generate an error message)
+.P
+\fBrun\fR specifies under which conditions the post-hook should be run.
+.br
+\fIcondition\fR must be one of:
+.br
+always: run the post-hook except when bung was interrupted.
+.br
+normal: run the post-hook except when bung was interrupted
+and when bung is finalising on error.
+.br
+Default: normal
+.P
+Any stdout and stderr from the pre-hook command is written to the bung log
+.P
+If the return code from the pre-hook command is:
+.br
+0: bung generates an information message
+.br
+1: bung generates a warning message
+.br
+2: bung generates an error message
+.P
+Examples
+.br
+Example hook scripts are normally installed in /usr/share/bung/doc/examples/hook scripts/
+.RE
+.
+.TP
+Pre-hook
+.RS
+.nh
+\fBPre-hook =
+\fR[\fBtimeout=\fIduration\fR]
+\fR[\fBtimeout_msgclass=\fImsgclass\fR]
+\fIcommand\fR
+.P
+Optional; no default; may appear several times
+.P
+\fBtimeout\fR specifies the maximum time allowed for the command to return
+before exiting with an error.
+\fIduration\fR is a floating point number with an optional suffix:
+.br
+\fBs\fR for seconds (default)
+.br
+\fBm\fR for minutes
+.br
+\fBh\fR for hours
+.br
+\fBd\fR for days
+.br
+Default: 10 (allow the pre-hook command 10 seconds to run)
+.P
+\fBtimeout_msgclass\fR specifies the class of the message to be generated
+when the command times out.
+.br
+\fImsgclass\fR must be I, W or E for information, warning or error.
+.br
+Default: E (generate an error message and finalise)
+.P
+Any stdout and stderr from the pre-hook command is written to the bung log
+.P
+If the return code from the pre-hook command is:
+.br
+0: bung generates an information message and continues
+.br
+1: bung generates an information message and finalises
+.br
+2: bung generates a warning message and continues
+.br
+3: bung generates a warning message and finalises
+.br
+4: bung generates an error message (implies does not continue)
+.P
+Examples
+.br
+Example hook scripts are normally installed in /usr/share/bung/doc/examples/hook scripts/
+.RE
+.
+.TP
+Shutdown
+.RS
+.nh
+\fBShutdown = Yes\fR|\fBNo
+.P
+Optional; default No
+.P
+When Shutdown is Yes, shutdown -h +5 is run as the script terminates
+.RE
+.
+.TP
+Snapshot
+.RS
+.nh
+\fBSnapshot = \fIoriginal_volume_name snapshot_volume_name fs_file
+\fR[\fBignore_files_under_fs_file\fR]
+\fR[\fBsize\fR=\fIsize\fR]
+.P
+Optional; no default; may appear several times
+.P
+\fBoriginal_volume_name\fR is as described in the lvcreate man page under
+--snapshot except, if there is a single volume group, the volume group path may
+be omitted, for example /dev/vg00/root maybe be given as root
+.P
+\fBsnapshot_volume_name\fR is the lvcreate man page's VolumeGroup{Name|Path}
+except, if there is a single volume group, the volume group path may be omitted,
+for example /dev/vg00/snap-root maybe be given as snap-root
+.P
+\fBignore_files_under_fs_file\fR tells bung not to generate a warning when
+there are files under the fs_file mountpoint
+.P
+\fBsize\fR is the snapshot volume size as described in the lvcreate man page
+under --size except commas may be used as thousands separators.
+.br
+\~\~\~\~Default; same size as the original volume.
+.P
+Examples
+.br
+\~\~\~\~Snapshot = /dev/vg0/var /dev/vg0/snap-var /mnt/snap-var size=2G
+.br
+\~\~\~\~Snapshot = var snap-var /mnt/snap-var
+.RE
+.
+.TP
+Subsidiary script
+.RS
+.nh
+\fBSubsidiary script = \fIscript_name config_name
+\fR[\fBdebug\fR]
+\fR[\fBionice\fR=\fIionice\fR]
+\fR[\fBnice\fR=\fInice\fR]
+\fR[\fBschedule\fR=\fItime_regex\fR]
+.P
+Required for super_bu and hotplug_bu.  Otherwise invalid.
+.br
+May be used multiple times.
+.P
+\fBscript_name\fR is the name of the script to run
+.P
+\fBconfig_name\fR is the configuration file for the script.
+.br
+If it does not contain a "/",
+it is relative to the bung configuration directory,
+normally /etc/bung.
+.br
+For a config file in the current working directory, use ./
+.P
+\fBdebug\fR enables debug in the script.
+.P
+\fBionice\fR runs the script with the given ionice value.
+The value is limited to ionice's -c and -n options as described on the ionice man page.
+ionice is only effective with the CFQ I/O scheduler.
+.P
+\fBnice\fR runs the script with the given nice value
+as described on the nice man page.
+.P
+\fBschedule\fR
+The subsidiary script is not run
+unless time_regex matches the current local time as YYYY/MM/DD/d/HH/SS.
+.br
+d is the day of the week from 1 (Mon) to 7 (Sun)
+.br
+More on MM/DD/d/HH/ in the smartd.conf man page under -s
+.br
+For example, to match Fridays: schedule=.*/.*/.*/5/.*/.*/.*
+.RE
+.SH ENVIRONMENT
+BUNG_BIN_DIR sets the default bung library directory.  Intended for developers' use.  Default /usr/bin.
+.br
+BUNG_COMPGEN_DIR.  If not unset or empty, writes global variables at start and end of run to
+$BUNG_COMPGEN_DIR/initial.vars and final.vars.  Intended for developers' use.
+.br
+BUNG_ETC_DIR sets the default configuration file directory.
+Default /etc/bung for root or ~/etc/bung for others.
+.br
+BUNG_LIB_DIR sets the default bung library directory.  Intended for developers' use. Default /usr/lib/bung.
+.br
+BUNG_LOG_DIR sets the default bung log directory.
+Default /var/log/bung for root or ~/var/log/bung for others.
+.br
+BUNG_TMP_DIR sets the default temporary directory root, also used for the PID file.
+Default /run/bung for root or ~/var/run/bung for others.
+.br
+.SH FILES
+Default directories are listed in the ENVIRONMENT section.
+.SH EXAMPLES
+In addition to the examples given above, example bung configuration files are
+normally installed in /usr/share/bung/doc/examples
+.SH AUTHOR
+Charles Atkinson bung@charlesmatkinson.org
+.SH SEE ALSO
+\fBcheck_hotplug_usage\fR(5 and 8),
+\fBbung-common\fR(8),
+\fBhotplug_bu\fR(5 and 8),
+\fBhotplug_bu_launcher\fR(5 and 8),
+\fBmysql_bu\fR(5 and 8),
+\fBopenldap_bu\fR(5 and 8),
+\fBpostgres_bu\fR(5 and 8),
+\fBrsync_bu\fR(5 and 8),
+\fBsuper_bu\fR(5 and 8)
+\fBsysinfo_bu\fR(5 and 8)
+\fBtemplated_bu\fR(5 and 8)
+\fBtemplate_file\fR(5)
+.br
+The bung user guide,
+normally installed in /usr/share/bung/doc

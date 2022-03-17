@@ -1,0 +1,202 @@
+.ig
+Copyright (C) 2022 Charles Atkinson
+
+Permission is granted to make and distribute verbatim copies of this
+manual provided the copyright notice and this permission notice are
+preserved on all copies.
+
+Permission is granted to copy and distribute modified versions of this
+manual under the conditions for verbatim copying, provided that the
+entire resulting derived work is distributed under the terms of a
+permission notice identical to this one.
+
+Permission is granted to copy and distribute translations of this
+manual into another language, under the above conditions for modified
+versions, except that this permission notice may be included in
+translations approved by the Free Software Foundation instead of in
+the original English.
+..
+.\" No adjustment (ragged right)
+.na
+.TH rsync 5 "17 Mar 2022" "Auroville" "Version 3.2.2"
+.SH NAME
+rsync_bu \- configuration for bung's rsync wrapper
+.SH SYNOPSIS
+.HP
+\fBEmail for report\fB\~=\~\fI... 
+.HP
+\fBLog retention\fB\~=\~\fI... 
+.HP
+\fBMount\fB\~=\~\fI... 
+.HP
+\fBOrganisation name\fB\~=\~\fI... 
+.HP
+\fBPre-hook\fB\~=\~\fI... 
+.HP
+\fBPost-hook\fB\~=\~\fI...
+.HP
+\fBrsync\~= SRC DEST \fR[\fBbackup_dir=\fIDIR\fR] \fR[\fB--bwlimit=\fIlimit\fR] \fR[\fBdest_dir_usage_warning=\fI%\fR] \fR[\fBdest_dir_windows\fR] \fR[\fB--exclude-from=\fIFILE\fR] \fR[\fBnocompression\fR] \fR[\fBno-numeric-ids\fR] \fR[\fBremote_host_timeout=\fIminutes,minutes\fR] \fR[\fBretention=\fIdays\fR[,\fBnowarn\fR]] \fR[\fBretry=\fIcount\fR] [\fB--timeout=\fISECONDS\fR] [\fBverbose=\fIlevel\fR] 
+.HP
+or
+.HP
+\fBrsync\~= SRC DEST \fR[\fBoptions=\fIoptions\fR] [\fBdest_dir_usage_warning=\fI%\fR] \fR[\fBretry=\fIcount\fR]
+.HP
+\fBShutdown\fB\~=\~\fI... 
+.HP
+\fBSnapshot\fB\~=\~\fI...
+.HP
+.nh
+.SH DESCRIPTION
+This page describes the keywords specific to rsync_bu
+.P
+The \fBbung-common\fR (5) man page describes
+the configuration file format
+and the common keywords ellipsised in the \fBSYNOPSIS\fR above
+.SH OPTIONS (keywords)
+.TP
+rsync
+.RS
+.HP
+.nh
+\fBrsync\~= SRC DEST \fR[\fBbackup_dir=\fIDIR\fR] \fR[\fB--bwlimit=\fIlimit\fR] \fR[\fBdest_dir_usage_warning=\fI%\fR] \fR[\fBdest_dir_windows\fR] \fR[\fB--exclude-from=\fIFILE\fR] \fR[\fBnocompression\fR] \fR[\fBno-numeric-ids\fR] \fR[\fBretention=\fIdays\fR[,\fBnowarn\fR]] \fR[\fBremote_host_timeout=\fIduration\fR] \fR[\fBretry=\fIcount\fR] [\fB--timeout=\fISECONDS\fR] [\fBverbose=\fIlevel\fR] 
+.HP
+or
+.HP
+\fBrsync\~= SRC DEST \fR[\fBoptions=\fIoptions\fR] [\fBdest_dir_usage_warning=\fI%\fR] \fR[\fBretry=\fIcount\fR]
+.P
+Required
+.P
+\fBSRC\fR is the source directory as described on the rsync man page.
+.P
+\fBDEST\fR is the destination directory as described on the rsync man page.
+.P
+\fB--bwlimit\fR
+sets rsync's --bwlimit option.
+.br
+Further information on the rsync man page in the --bwlimit section.
+.br
+Default: "_Changed and deleted files"
+.P
+.P
+\fBbackup_dir\fR
+is used to override bung's default "_Changed and deleted files" backup
+directory.  Apart from personal preference, this is useful when the
+source directory has a "_Changed and deleted files"
+sub-directory, as when backing up a backup.
+.br
+Further information on the rsync man page in the --backup-dir section.
+.br
+Default: "_Changed and deleted files"
+.P
+\fBdest_dir_usage_warning\fR is the % file system usage that will trigger a
+warning after the backup is finished.
+.br
+Use dest_dir_usage_warning=0 to disable.
+.br
+Default: 80
+.P
+\fBdest_dir_windows\fR tells rsync_bu to use rsync options suitable for
+writing to a Windows FAT or NTFS file system.
+.br
+Default: assume a sane file system.
+.P
+\fB--exclude-from\fR is an exclude file
+as described on the rsync man page under --exclude-from
+except that any FILE that does not contain a "/"
+is relative to the bung configuration directory,
+normally /etc/bung for root and ~/etc/bung for others.
+.br
+Default: no exclude file.
+.P
+\fBnocompression\fR
+Do not use rsync's --compress option when the source or destination is remote.
+.br
+It is useful when the CPU(s) at either end are weak or normally heavily loaded,
+especially when the network is fast and normally lighly loaded.
+.P
+\fBno-numeric-ids\fR
+Do not use rsync's --numeric-ids option
+.br
+It is useful when using rsync_bu to sync files to a destination system
+which has the same groups and users by name but different by number
+and the files may be used on the destination system.i
+.br
+bung's default is --numeric-ids because it works best when restoring files
+from the destination system.
+.P
+\fBoptions\fR
+sets the rsync options, verbatim.
+.br
+It is useful when rsync_bu's default rsync options are not suitable.
+Individual options may not include spaces, tabs and newlines.
+.P
+\fBremote_host_timeout\fR
+specifies the time rsync_bu waits
+while testing the connection to the remote host
+before failing.
+.br
+\fIduration\fR
+is a floating point number with an optional suffix:
+s for seconds (the default),
+m for minutes,
+h for hours,
+d for days. 
+.br
+Default 10m
+.P
+\fBretention\fR
+specifies the number of days that rsync backup files are kept.
+.br
+If retention=0 is used and the destination directory has a
+"_Changed and deleted files" sub-directory, a warning will be generated.
+The warning can be disabled by using retention=0,nowarn.
+.br
+Default: 28
+.P
+\fBretry\fR
+specifies the number of times the rsync command is retried on timeout
+.br
+Default: 2
+.P
+\fB--timeout\fR 
+is the rsync I/O timeout as explained on the rsync man page
+except rsync_bu defaults to --timeout=600.
+.P
+\fBverbose\fR is the number of --verbose options to run rsync with.
+.br
+Valid range: 0 to 3
+.br
+Default: 1
+.P
+\fBNote about remote SRC or DEST\fR
+.br
+When SRC or DEST begin with begin with [USER@]HOST:,
+HOST is resolved according to ssh procedure
+which usually means it is an entry in /root/.ssh/config
+which normally also names the private key to use.
+The corresponding public key must be in the remote host's
+user's /root/.ssh/authorized_keys or authorized_keys2 file.
+The local /root/.ssh/known_hosts must have an entry for the remote host.
+If it does not, ssh will prompt interactively.
+When rsync is being run by rsync_bu,
+rsync_bu will hang until interaction is completed.
+When setting up such a job,
+use the paswordless logon interactively once
+to add the remote host to the local /root/.ssh/known_hosts.
+.RE
+.
+.SH ENVIRONMENT
+Environment variables are described in bung-common (5).
+.SH FILES
+Default directories are described in bung-common (5).
+.SH EXAMPLES
+Example rsync_bu configuration files are
+normally installed in /usr/share/bung/doc/examples
+.SH AUTHOR
+Charles Atkinson bung@charlesmatkinson.org
+.SH SEE ALSO
+\fBbung-common\fR(5 and 8),
+\fBrsync_bu\fR(8)
+.br
+The bung user guide,
+normally installed in /usr/share/bung/doc

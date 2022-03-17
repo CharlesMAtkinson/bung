@@ -1,0 +1,407 @@
+# Copyright (C) 2022 Charles Atkinson
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+
+    local buf cmd fn i j k log_dir_realpath new_args regex tmp_dir_realpath
+    local user_home_dir user_home_dir_emsg
+
+    # Configure shell environment
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    export LANG=en_GB.UTF-8
+    export LANGUAGE=$LANG
+    for var_name in LC_ADDRESS LC_ALL LC_COLLATE LC_CTYPE LC_IDENTIFICATION \
+        LC_MEASUREMENT LC_MESSAGES LC_MONETARY LC_NAME LC_NUMERIC LC_PAPER \
+        LC_TELEPHONE LC_TIME
+    do
+        unset $var_name
+    done
+
+    export PATH=/usr/local/bin:/usr/sbin:/sbin:/usr/bin:/bin
+    IFS=$' \n\t'
+    set -o nounset
+    shopt -s extglob            # Enable extended pattern matching operators
+    unset CDPATH                # Ensure cd behaves as expected
+    umask 022
+
+    # Initialise environment variables
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # If these are already set, they are not changed
+    # BUNG_LIB_DIR is set by the calling script and used to source this scrippet
+    export BUNG_BIN_DIR=${BUNG_BIN_DIR:-/usr/bin}
+
+    # Initialise some global logic variables
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    readonly false=
+    readonly true=true
+
+    conf_check_flag=$false
+    debugging_flag=$false
+    error_flag=$false
+    finalising_flag=$false
+    interrupt_flag=$false
+    logging_flag=$false
+    pid_file_locked_flag=$false
+    subsidiary_mode_flag=$false
+    tmp_dir_created_flag=$false
+    udev_flag=$false
+    warning_flag=$false
+
+    # Initialise some global string variables
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Variables specific to individual scripts which may be set in config files
+    # are defaulted in the individual scripts
+    conf_name='(unknown config)'
+    fn_date_format='%Y-%m-%d@%H:%M:%S'
+    log_retention=28
+    org_name='(unknown organisation)'
+    shutdown=no
+    signal_num_received=
+    readonly absolute_path_re='^/'
+    readonly hook_rc_e=4                   # Error
+    readonly hook_rc_ic=0                  # Information, continue
+    readonly hook_rc_if=1                  # Information, finalise
+    readonly hook_rc_wc=2                  # Warning, continue
+    readonly hook_rc_wf=3                  # Error, finalise
+    readonly lf=$'\n'                      # Linefeed
+    readonly log_date_format='+%H:%M:%S'   # Date command format used in log messages
+    readonly msg_lf=$'\n    '              # Message linefeed and indent
+    readonly script_name=${0##*/}
+    readonly sig_names=(. $(kill -L | sed 's/[[:digit:]]*)//g'))
+
+    # Default the conf, log and tmp dirs
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    user_name=$(id --user --name)
+    if [[ $user_name = root ]]; then
+        conf_dir=/etc/bung
+        log_dir=/var/log/bung
+        tmp_dir_root=/run/bung
+    else
+        user_home_dir_emsg=
+        user_home_dir=$(getent passwd "$user_name" | cut -f6 -d:)
+        [[ $user_home_dir = '' ]] && user_home_dir_emsg+=$msg_lf"User $user_name has no home directory"
+        user_home_dir=${user_home_dir%/}    # Strip any trailing /
+        buf=$(ck_file "$user_home_dir" d:rwx: 2>&1)
+        [[ $buf != '' ]] && user_home_dir_emsg+=$msg_lf"$user_name home directory: $buf"
+        conf_dir=$user_home_dir/etc/bung
+        log_dir=$user_home_dir/var/log/bung
+        tmp_dir_root=$user_home_dir/var/run/bung
+    fi
+    # Envars have the higest priority below command line options
+    if [[ ${BUNG_ETC_DIR:-} != '' ]]; then
+        conf_dir=$BUNG_ETC_DIR
+    fi
+    if [[ ${BUNG_LOG_DIR:-} != '' ]]; then
+        log_dir=$BUNG_LOG_DIR
+    fi
+    if [[ ${BUNG_TMP_DIR:-} != '' ]]; then
+        tmp_dir_root=$BUNG_TMP_DIR
+    fi
+
+    # Initialise some global numeric variables
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Variables specific to individual scripts which may be set in config files
+    # are defaulted in the individual scripts
+    ck_hotplug_usage_idx=-1    # TODO: move to hotplug_bu
+    email_for_report_idx=-1
+    hotplug_dev_idx=-1         # TODO: move to hotplug_bu
+    mount_done_mountpoint_idx=-1
+    mount_idx=-1
+    openldap_idx=-1            # TODO: move to openldap_bu
+    pg_idx=-1                  # TODO: move to postgres_bu
+    pre_hook_idx=-1
+    post_hook_idx=-1
+    snapshot_idx=-1
+    subsidiaryscript_idx=-1
+    sysinfo_idx=-1             # TODO: move to sysinfo_bu
+    readonly lvremove_count_max=100
+
+    # Initialise local regex variables
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    local -r limits_OK_regex='^(|[[:digit:]]+|unlimited)$'
+
+    # Parse command line
+    # ~~~~~~~~~~~~~~~~~~
+    local optarg opt org_name_optarg
+    local emsg=
+    local opt_c_flag=$false
+    local opt_l_flag=$false
+    local opt_L_flag=$false
+    local opt_o_flag=$false
+    local opt_s_flag=$false
+    local opt_t_flag=$false
+    local opt_u_flag=$false
+    local -r args=("$@")
+    while getopts :a:Cc:dhL:l:o:p:rst:uvw opt "$@"
+    do
+        case $opt in
+            C )
+                conf_check_flag=$true
+                ;;
+            c )
+                conf_fn=$OPTARG
+                opt_c_flag=$true
+                ;;
+            d )
+                debugging_flag=$true
+                ;;
+            h )
+                debugging_flag=$false
+                usage verbose
+                exit 0
+                ;;
+            L )
+                log_dir=$OPTARG
+                opt_L_flag=$true
+                ;;
+            l )
+                log_fn=$OPTARG
+                opt_l_flag=$true
+                ;;
+            o )
+                org_name_optarg=$OPTARG
+                opt_o_flag=$true
+                ;;
+            p )
+                export PATH=$OPTARG
+                ;;
+            r )
+                [[ $script_name != rsync_bu ]] \
+                    && emsg+=$msg_lf"Invalid option '-$opt'"
+                rsync_dry_run_flag=$true
+                ;;
+            s )
+                [[ $script_name =~ ^hotplug_bu_launcher\$ ]] \
+                    && emsg+=$msg_lf"Invalid option '-$opt'"
+                subsidiary_mode_flag=$true
+                opt_s_flag=$true
+                ;;
+            t )
+                tmp_dir_root=$OPTARG
+                pid_dir=$OPTARG
+                opt_t_flag=$true
+                ;;
+            u )
+                [[ ! $script_name =~ ^hotplug_bu(_launcher)?$ ]] \
+                    && emsg+=$msg_lf"Invalid option '-$opt'"
+                udev_flag=$true
+                ;;
+            v )
+                echo "$script_name version $script_ver" >&2
+                exit 0
+                ;;
+            w )
+                fn_date_format='%Y-%m-%d@%Hh%Mm%S'
+                ;;
+            : )
+                emsg+=$msg_lf"Option $OPTARG must have an argument"
+                [[ $OPTARG = c ]] && { opt_c_flag=$true; conf_fn=/bin/bash; }
+                ;;
+            * )
+                emsg+=$msg_lf"Invalid option '-$OPTARG'"
+        esac
+    done
+
+    # Check option arguments
+    # ~~~~~~~~~~~~~~~~~~~~~~
+    [[ $opt_o_flag && $org_name_optarg =~ / ]] \
+        && emsg+=$msg_lf"Invalid -o option value '$opt' (may not contain /)"
+    if [[ $opt_L_flag ]]; then
+        log_dir_realpath=$(readlink --canonicalize-missing -- "$log_dir" 2>&1)
+        if (($?==0)); then
+            buf=$(ck_file "$log_dir_realpath" d:rwx: 2>&1)
+            [[ $buf != '' ]] \
+                && emsg+=$msg_lf"Invalid -L option value '$log_dir': $buf"
+        else
+           emsg+=$msg_lf"Invalid -L option value '$log_dir' ($log_dir_realpath)"
+        fi
+    fi
+    if [[ $opt_l_flag && $log_fn != /dev/tty ]]; then
+        log_dir=${log_fn%/*}
+        log_dir_realpath=$(readlink --canonicalize-missing -- "$log_dir" 2>&1)
+        if (($?==0)); then
+            buf=$(ck_file "$log_dir_realpath" d:rwx: 2>&1)
+            [[ $buf != '' ]] \
+                && emsg+=$msg_lf"Invalid -l option value '$log_fn': $buf"
+        else
+           emsg+=$msg_lf"Invalid -l option value '$log_fn' ($log_dir_realpath)"
+        fi
+    fi
+    if [[ ! $opt_l_flag && ! $opt_L_flag ]]; then    # Not specified so default
+        if [[ $user_name = root || $user_home_dir_emsg != '' ]]; then
+            log_dir_realpath=$(readlink --canonicalize-missing -- "$log_dir" 2>&1)
+            if (($?==0)); then
+                buf=$(ck_file "$log_dir_realpath" d:rwx: 2>&1)
+                [[ $buf != '' ]] \
+                    && emsg+=$msg_lf"Default log directory '$log_dir': $buf"
+            else
+               emsg+=$msg_lf"Default log directory '$log_dir' ($log_dir_realpath)"
+            fi
+
+        else
+            emsg+=$user_home_dir_emsg
+        fi
+    fi
+    if [[ $opt_t_flag ]]; then
+        if [[ ! $tmp_dir_root =~ $absolute_path_re ]]; then
+            if [[ $user_name = root ]]; then
+                tmp_dir_root=/run/bung/$tmp_dir_root
+            else
+                [[ $user_name != root && $user_home_dir_emsg != '' ]] \
+                    && emsg+=$user_home_dir_emsg
+                tmp_dir_root=$user_home_dir/var/run/bung/$tmp_dir_root
+            fi
+        fi
+        tmp_dir_realpath=$(readlink --canonicalize-missing -- \
+            "$tmp_dir_root" 2>&1)
+        if (($?==0)); then
+            buf=$(ck_file "$tmp_dir_realpath" d:rwx: 2>&1)
+            if [[ $buf != '' ]]; then
+                emsg+=$msg_lf'Invalid -t option value'
+                emsg+=" '$tmp_dir_root': $buf"
+            fi
+        else
+           emsg+=$msg_lf'Invalid -t option value'
+           emsg+=" '$tmp_dir_root' ($tmp_dir_realpath)"
+        fi
+    fi
+
+    # Test for mutually exclusive options
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [[ $opt_L_flag && $opt_l_flag ]] \
+        && emsg+=$msg_lf'Invalid options combination: -L and -l'
+    [[ $opt_s_flag && $opt_u_flag ]] \
+        && emsg+=$msg_lf'Invalid options combination: -s and -u'
+
+    # Test for mandatory options not set
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    if [[ ! $opt_c_flag ]]; then
+        emsg+=$msg_lf"Mandatory option -c not given"
+    fi
+
+    # Test for extra arguments
+    # ~~~~~~~~~~~~~~~~~~~~~~~~
+    shift $(($OPTIND-1))
+    if [[ $* != '' ]]; then
+        emsg+=$msg_lf"Invalid extra argument(s) '$*'"
+    fi
+
+    # Check the config file
+    # ~~~~~~~~~~~~~~~~~~~~~
+    if [[ $opt_c_flag ]]; then
+        if [[ ! $conf_fn =~ $absolute_path_re ]]; then
+            conf_fn=$conf_dir/$conf_fn
+            [[ $user_name != root && $user_home_dir_emsg != '' ]] \
+                && emsg+=$user_home_dir_emsg
+        fi
+        buf=$(ck_file "$conf_fn" f:r: 2>&1)
+        [[ $buf != '' ]] && emsg+=$msg_lf"$buf"
+    fi
+
+    # Check the tmp_dir_root directory
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # The tmp_dir_root directory will be parent to the temporary directory
+    mkdir -p "$tmp_dir_root" 2>/dev/null
+    buf=$(ck_file "$tmp_dir_root" d:rwx: 2>&1)
+    [[ $buf != '' ]] && emsg+=$msg_lf"$buf"
+    pid_dir=$tmp_dir_root
+
+    # Report any command line errors
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    if [[ $emsg != '' ]]; then
+        msg E "$emsg"
+    fi
+
+    # Set up logging
+    # ~~~~~~~~~~~~~~
+    # Cannot be done earlier because needs the conffile name
+    # Default is to log to file because normal usage is not interactive
+    conf_name=${conf_fn##*/}
+    if [[ ! $opt_l_flag && ! $opt_L_flag ]]; then    # Not specified so default
+        [[ $user_name != root && $user_home_dir_emsg != '' ]] \
+                && emsg+=$user_home_dir_emsg
+        buf=$(ck_file "$log_dir" d:rwx: 2>&1)
+        if [[ $buf = '' ]]; then
+            log_fn=$log_dir/$script_name+$conf_name.$(date "+$fn_date_format").log
+            buf=$(touch "$log_fn" 2>&1)
+            if (($?>0)); then
+                msg E "cannot create $log_fn: $buf"
+            fi
+        else
+            msg E "cannot create log: $buf"
+        fi
+    elif [[ $opt_L_flag ]]; then
+        log_fn=$log_dir/$script_name+$conf_name.$(date "+$fn_date_format").log
+    fi
+    [[ ${log_fn:-} != /dev/tty ]] && logging_flag=$true
+    exec >>"$log_fn"
+    exec 2>>"$log_fn"
+
+    fct 'initialise' 'started (this message delayed until logging initialised)'
+    msg I "$script_name+$conf_name $script_ver started on $(hostname -f). PID: $$, PPID: $PPID" logger
+    msg I "Command line: $0 $(printf '%q ' "${args[@]}")"
+
+    # Create temporary directory
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # If the mktemplate is changed, tmp_dir_regex in the finalise function
+    # may also need to be changed.
+    buf=$(mktemp -d "$tmp_dir_root/$script_name+$conf_name.XXXXXX" 2>&1)
+    if (($?==0)); then
+        tmp_dir=$buf
+        tmp_dir_created_flag=$true
+        out_fn=$tmp_dir/out; rc_fn=$tmp_dir/rc    # For run_cmd_with_timeout
+        mkdir "$tmp_dir/mnt" || exit 1
+        chmod 700 "$tmp_dir" || exit 1
+        msg D "Created temporary directory $tmp_dir"
+    else
+        msg E "Unable to create temporary directory:$buf"
+    fi
+
+    # Ensure non-subsidiary scripts are in a dedicated process group
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # * Required for ease of killing the whole bung process tree
+    # * Not required for hotplug_bu_launcher because it exits in a few seconds
+    # * Does nothing when the script is already in a dedicated process group
+    #   such as when called directly by cron or systemd and when executed by an
+    #   interactive bash shell
+    if [[ ! $subsidiary_mode_flag && $script_name != hotplug_bu_launcher ]]; then
+        local my_pgid=$(ps -o pgid= -p $$)
+        if (( my_pgid!=$$)); then
+            msg I "Re-launching in dedicated process group"
+
+            # Remove any -L (log_dir) option
+            for ((i=0;i<${#args[*]};i++))
+            do
+                if [[ ${args[i]} = -L ]]; then
+                    ((i++))
+                    continue
+                fi
+                new_args+=("${args[i]}")
+            done
+
+           # Re-launch with -l option naming the current log file
+           buf=$(exec setsid --wait "$0" "${new_args[@]}" -l "$log_fn" 2>&1)
+           if [[ $buf != '' ]]; then
+               msg E "$buf"
+           fi
+           exit 0
+        fi
+    fi
+
+    # Set traps
+    # ~~~~~~~~~
+    source "$BUNG_LIB_DIR/set_traps.fun" || exit 1
+    set_traps finalise
+
+# vim: filetype=bash:

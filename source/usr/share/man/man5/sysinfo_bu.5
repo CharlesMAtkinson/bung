@@ -1,0 +1,93 @@
+.ig
+Copyright (C) 2021 Charles Atkinson
+
+Permission is granted to make and distribute verbatim copies of this
+manual provided the copyright notice and this permission notice are
+preserved on all copies.
+
+Permission is granted to copy and distribute modified versions of this
+manual under the conditions for verbatim copying, provided that the
+entire resulting derived work is distributed under the terms of a
+permission notice identical to this one.
+
+Permission is granted to copy and distribute translations of this
+manual into another language, under the above conditions for modified
+versions, except that this permission notice may be included in
+translations approved by the Free Software Foundation instead of in
+the original English.
+..
+.\" No adjustment (ragged right)
+.na
+.TH sysinfo 5 "17 Mar 2022" "Auroville" "Version 3.2.2"
+.SH NAME
+sysinfo_bu \- configuration for bung's system information generator
+.SH SYNOPSIS
+.HP
+\fBEmail for report\fB\~=\~\fI... 
+.HP
+\fBLog retention\fB\~=\~\fI... 
+.HP
+\fBMount\fB\~=\~\fI... 
+.HP
+\fBOrganisation name\fB\~=\~\fI... 
+.HP
+\fBPre-hook\fB\~=\~\fI... 
+.HP
+\fBPost-hook\fB\~=\~\fI...
+.HP
+\fBShutdown\fB\~=\~\fI... 
+.HP
+\fBSnapshot\fB\~=\~\fI...
+.HP
+\fBsysinfo\~= \fR[\fBdest_dir=\fIDIR\fR] \fR[\fBdest_dir_usage_warning=\fI%\fR] \fR[\fBretention=\fIdays\fR\fR]]
+.HP
+.SH DESCRIPTION
+This page describes the keywords specific to sysinfo_bu
+.P
+The \fBbung-common\fR (5) man page describes
+the configuration file format
+and the common keywords ellipsised in the \fBSYNOPSIS\fR above
+.SH OPTIONS (keywords)
+.TP
+sysinfo
+.RS
+.HP
+.nh
+\fBsysinfo\~= \fR[\fBdest_dir=\fIDIR\fR] \fR[\fBdest_dir_usage_warning=\fI%\fR]
+\fR[\fBretention=\fIdays\fR]
+.P
+Required
+.P
+\fBdest_dir\fR
+Destination directory for the system information files
+.br
+Default: /var/backup/sysinfo
+.P
+\fBdest_dir_usage_warning\fR is the % file system usage that will trigger a
+warning after the backup is finished.
+.br
+Use dest_dir_usage_warning=0 to disable.
+.br
+Default: 80
+.P
+\fBretention\fR
+specifies the number of days that system information files are kept.
+.br
+Default: 28
+.RE
+.
+.SH ENVIRONMENT
+Environment variables are described in bung-common (5).
+.SH FILES
+Default directories are described in bung-common (5).
+.SH EXAMPLES
+Example sysinfo_bu configuration files are
+normally installed in /usr/share/bung/doc/examples
+.SH AUTHOR
+Charles Atkinson bung@charlesmatkinson.org
+.SH SEE ALSO
+\fBbung-common\fR(5 and 8),
+\fBsysinfo_bu\fR(8)
+.br
+The bung user guide,
+normally installed in /usr/share/bung/doc

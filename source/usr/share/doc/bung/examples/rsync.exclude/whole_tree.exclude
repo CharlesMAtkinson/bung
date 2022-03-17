@@ -1,0 +1,58 @@
+# Configuration file for rsync
+
+# * Lines beginning with # and empty lines are ignored.
+# * The format is defined in the rsync man page under:
+#   1. --exclude-from=FILE
+#   2. FILTER RULES section (search for "filter rules allow")
+
+# Exclude lines for use when synchronising the whole tree
+# * Intended for use when /home and /var are not backed up individually
+# * Intended to provide all that is necessary for recovery
+# * Intended for use when /home is used by GUI desktop users
+
+**/.gvfs/
+/dev/*
+/home/lost+found/*
+/home/*/.adobe/Flash_Player/AssetCache/*
+/home/*/.cache/*
+/home/*/.compiz-1/session/*
+/home/*/.config/nautilus/saved-session-*
+/home/*/.Dropbox/.dropbox.cache/*
+/home/*/.local/
+/home/*/.macromedia/*
+/home/*/.metacity/sessions/*
+/home/*/.mozilla/firefox/*/Cache/*
+/home/*/.mozilla/firefox/*/Cache.Trash*/
+/home/*/.mozilla/firefox/Crash\ Reports/*
+/home/*/.opera/cache/*
+/home/*/.thumbnails/*
+/home/*/.thunderbird/**/Bin
+/home/*/.thunderbird/**/Bin.*
+/home/*/.thunderbird/*/Cache/*
+/home/*/.thunderbird/Crash\ Reports/*
+/home/*/.thunderbird/*/global-messages-db.sqlite
+/home/*/.thunderbird/*/ImapMail/imap.gmail*.com/*
+/home/*/.thunderbird/*/ImapMail/imap.googlemail*.com/*
+/home/*/.thunderbird/**.msf
+/home/*/.thunderbird/**/Spam
+/home/*/.thunderbird/**/Spam.*
+/home/*/.thunderbird/**/Trash
+/home/*/.thunderbird/**/Trash.*
+/home/*/.Trash*/*
+/home/*/Trash*/*
+/home/*/urlclassifier3.sqlite
+/home/*/.VirtualBox/**.vdi
+/home/*/VirtualBox VMs/**.vdi
+/home/*/xapiandb/*
+/lost+found/*
+/media/*
+/mnt/*
+/proc/*
+/run/*
+/sys/*
+/tmp/*
+/var/crash/*
+/var/lib/nginx/proxy/*
+/var/lock/*
+/var/run/*
+/var/tmp/*

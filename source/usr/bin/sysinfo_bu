@@ -1,0 +1,1311 @@
+#! /bin/bash
+
+# Copyright (C) 2021 Charles Atkinson
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+
+# Purpose:
+#   Runs a variety of system information generating tools as part of the
+#   Backup Next Generation (bung) suite
+
+# Usage:
+#   See usage.fun or use -h option.
+
+# Programmers' notes: error and trap handling:
+#   * All errors are fatal and finalise() is called.
+#   * At any time, a trapped event may transfer control to finalise().
+#   * To allow finalise() to tidy up before exiting, changes that need to be
+#     undone are noted with global variables named <change name>_flag and the
+#     data required to undo those changes is kept in global variables.
+#   * finalise() uses the same functions to undo the changes as are used when
+#     they are undone routinely.
+#   * $finalising_flag is used to prevent recursive calls when errors are
+#     encountered while finalise() is running,
+
+# Programmers' notes: variable names and values
+#   * Directory names: *_dir.  Their values should not have a trailing /
+#   * File names: *_fn
+#   * Logicals: *_flag containing values $true or $false.
+#     The $true and $false values allow "if [[ $debugging_flag ]]"
+#   * $buf is a localised scratch buffer
+
+# Programmers' notes: file descriptor usage
+#   0 (stdin) not changed
+#   1 (stdout) not changed or redirected to log file
+#   2 (stderr) not changed or redirected to log file
+#   3 used for reading the configuration file
+#   9 used for locking the PID file
+
+# Programmers' notes: bash library
+#   * May be changed by setting environment variable BUNG_LIB_DIR
+export BUNG_LIB_DIR=${BUNG_LIB_DIR:-/usr/lib/bung}
+source "$BUNG_LIB_DIR/version.scrippet" || exit 1
+
+# Programmers' notes: function call tree
+#    +
+#    |
+#    +-- initialise
+#    |   |
+#    |   +-- usage
+#    |   |
+#    |   +-- parse_conf
+#    |   |   |
+#    |   |   +-- parse_conf_sysinfo
+#    |   |   |
+#    |   |   +-- parse_conf_*
+#    |   |
+#    |   +-- err_trap_email_for_report
+#    |   |
+#    |   +-- postprocess_mount_conf
+#    |   |
+#    |   +-- err_trap_mount_conf
+#    |   |
+#    |   +-- postprocess_org_name_conf
+#    |   |
+#    |   +-- err_trap_post_hook_conf
+#    |   |
+#    |   +-- err_trap_pre_hook_conf
+#    |   |
+#    |   +-- err_trap_sysinfo_conf
+#    |   |
+#    |   +-- err_trap_shutdown
+#    |   |
+#    |   +-- postprocess_snapshot_conf
+#    |   |
+#    |   +-- err_trap_snapshot_conf
+#    |   |
+#    |   +-- get_platform
+#    |   |
+#    |   +-- do_pid
+#    |
+#    +-- do_snapshots
+#    |
+#    +-- do_mounts
+#    |   |
+#    |   +-- get_fs_type
+#    |   |
+#    |   +-- do_mount_command
+#    |
+#    +-- err_trap_sysinfo_files_and_dirs
+#    |
+#    +-- run_pre_hooks
+#    |
+#    +-- sysinfo_bu
+#    |   |
+#    |   +-- get_name_info
+#    |   |
+#    |   +-- get_hw_info
+#    |   |   |
+#    |   |   + get_mem_info
+#    |   |   |
+#    |   |   + get_eth_hw_info
+#    |   |   |
+#    |   |   + get_hdd_and_sdd_info
+#    |   |
+#    |   +-- get_bios_info
+#    |   |
+#    |   +-- get_network_info
+#    |   |
+#    |   +-- get_storage_info
+#    |   |
+#    |   +-- get_groups_n_user_info
+#    |   |
+#    |   +-- get_database_mysql_info
+#    |   |
+#    |   +-- get_database_pg_info
+#    |   |
+#    |   +-- get_package_info
+#    |   |
+#    |   +-- report_dest_dir_usage
+#    |
+#    +-- finalise
+#
+# Utility functions called from various places:
+#     ck_file ck_uint do_umounts err_trap_uint fct msg parse_conf_subkey_value
+
+# Function definitions in alphabetical order.  Execution begins after the last function definition.
+
+source "$BUNG_LIB_DIR/ck_file.fun" || exit 1
+source "$BUNG_LIB_DIR/ck_uint.fun" || exit 1
+source "$BUNG_LIB_DIR/do_mounts.fun" || exit 1
+source "$BUNG_LIB_DIR/do_pid.fun" || exit 1
+source "$BUNG_LIB_DIR/do_snapshots.fun" || exit 1
+source "$BUNG_LIB_DIR/do_umounts.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_email_for_report.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_mount_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_post_hook_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_pre_hook_conf.fun" || exit 1
+
+#--------------------------
+# Name: err_trap_sysinfo_conf
+# Purpose:
+#   Error traps the sysinfo_bu-specific configuration
+# Arguments: none
+# Global variable usage: adds any error message to emsg, prefixed by $msg_lf
+# Output: none
+# Return value: 1 when an error is detected, 0 otherwise
+#--------------------------
+function err_trap_sysinfo_conf {
+    fct "${FUNCNAME[0]}" 'started'
+    local buf i my_rc=0 old_emsg
+
+    # Initialise
+    # ~~~~~~~~~~
+    old_emsg=$emsg
+    emsg=
+    my_rc=0
+
+    # Nothing to do?
+    # ~~~~~~~~~~~~~~
+    if ((sysinfo_idx<0)); then
+        emsg+=$msg_lf"No backup configured (no sysinfo keyword)"
+    fi
+
+    [[ $emsg != '' ]] && my_rc=1
+    emsg=$old_emsg$emsg
+    fct "${FUNCNAME[0]}" "returning, rc $my_rc"
+    return $my_rc
+}  # end of function err_trap_sysinfo_conf
+
+#--------------------------
+# Name: err_trap_sysinfo_files_and_dirs
+# Purpose: error traps sysinfo-specific files and directories
+# Arguments: none
+# Return code: always 0; does not return on error
+#--------------------------
+function err_trap_sysinfo_files_and_dirs {
+    fct "${FUNCNAME[0]}" 'started'
+    local buf i
+    local my_emsg=
+
+    # For each configured rsync job
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    for ((i=0;i<=sysinfo_idx;i++))
+    do
+        buf=$(ck_file "${dest_dirs[i]}" d:rwx 2>&1)
+        if [[ $buf != '' ]]; then
+            my_emsg+=$msg_lf$buf
+        fi
+    done
+
+    if [[ $my_emsg != '' ]]; then
+        msg E "File and/or directory problems:$my_emsg"
+    fi
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function err_trap_sysinfo_files_and_dirs
+
+source "$BUNG_LIB_DIR/err_trap_shutdown.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_snapshot_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_uint.fun" || exit 1
+source "$BUNG_LIB_DIR/fct.fun" || exit 1
+source "$BUNG_LIB_DIR/finalise.fun" || exit 1
+
+#--------------------------
+# Name: get_bios_info
+# Purpose: gets BIOS information
+# Arguments: $1 index into sysinfo_ arrays, not used
+# Return code: always 0; does not return on error
+#--------------------------
+function get_bios_info {
+    fct "${FUNCNAME[0]}" 'started'
+    local cmd line output
+    local -r wanted_line_regex='^[[:space:]]*(Vendor|Version|Release Date|BIOS Revision):'
+
+    echo $'\n'"**** BIOS ****" >> "$my_out_fn" || finalise 1
+
+    # Ensure dmidecode is available and functional
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    cmd=dmidecode
+    if [[ $platform = DomU ]]; then
+        msg I "Command $cmd not functional"
+        fct "${FUNCNAME[0]}" 'returning 1'
+        return 1
+    fi
+    if ! hash "$cmd" &>/dev/null; then
+        msg I "Command $cmd not available"
+        fct "${FUNCNAME[0]}" 'returning 1'
+        return 1
+    fi
+
+    # Get the key information from dmidecode output
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    cmd=(dmidecode --type 0)
+    msg I "Running ${cmd[*]}"
+    output=
+    while read -r line
+    do
+       if [[ $line =~ $wanted_line_regex ]]; then
+           output+=$'\n'$line
+       fi
+    done < <("${cmd[@]}")
+
+    echo "---- ${cmd[*]} ----" >> "$my_out_fn" || finalise 1
+    echo "${output#$'\n\n'}" >> "$my_out_fn" || finalise 1
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function get_bios_info
+
+#--------------------------
+# Name: get_database_mysql_info
+# Purpose: gets MySQL and MariaDB database information
+# Arguments: none
+# Return code: always 0; does not return on error
+#--------------------------
+function get_database_mysql_info {
+    fct "${FUNCNAME[0]}" 'started'
+    local buf msg out
+
+    echo $'\n'"**** DATABASES ****" >> "$my_out_fn" || finalise 1
+
+    # Nothing to do?
+    # ~~~~~~~~~~~~~~
+    buf=$(ps -ef | grep -E '/usr/sbin/mysql[d]( |$)' 2>&1)
+    if [[ $buf = '' ]]; then
+        msg='mysqld is not running'
+        msg I "$msg"
+        echo "$msg" >> "$my_out_fn" || finalise 1
+        fct "${FUNCNAME[0]}" 'returning'
+        return
+    fi
+
+    # List databases
+    # ~~~~~~~~~~~~~~
+    out='---- mysql SHOW DATABASES ----'
+    buf=$(
+        mysql --defaults-file=/etc/bung/mysql.cnf --batch --user=backup_user --skip-column-names --execute="
+            SHOW DATABASES;
+        " 2>&1
+    )
+    if [[ $buf =~ ^ERROR ]]; then
+        msg W "Unable to list databases: $buf"
+    else
+        out+=$'\n'$buf
+    fi
+
+    echo "$out" >> "$my_out_fn" || finalise 1
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function get_database_mysql_info
+
+#--------------------------
+# Name: get_database_pg_info
+# Purpose: gets Postgres database information
+# Arguments: none
+# Return code: always 0; does not return on error
+#--------------------------
+function get_database_pg_info {
+    fct "${FUNCNAME[0]}" 'started'
+    local buf db_list msg out tmp_dir_pg
+
+    # Nothing to do?
+    # ~~~~~~~~~~~~~~
+    buf=$(ps -ef | grep '/usr/lib/postgresql/.*/bin/postgre[s]' 2>&1)
+    if [[ $buf = '' ]]; then
+        msg='postgres is not running'
+        msg I "$msg"
+        echo "$msg" >> "$my_out_fn" || finalise 1
+        fct "${FUNCNAME[0]}" 'returning'
+        return
+    fi
+
+    # Create temporary directory for user postgres
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    buf=$(mktemp -d "$tmp_dir_root/$script_name+$conf_name.pg.XXXXXX" 2>&1)
+    if (($?==0)); then
+        tmp_dir_pg=$buf
+        chmod 700 "$tmp_dir_pg" || finalise 1
+        chown postgres "$tmp_dir_pg" || finalise 1
+    else
+        msg E "Unable to create temporary directory for user postgres:$buf"
+    fi
+
+    # List databases
+    # ~~~~~~~~~~~~~~
+    msg I 'Listing Postgres databases'
+    psql_my_out_fn=$tmp_dir_pg/psql.out
+    buf=$(cd "$tmp_dir_pg" 2>&1 \
+        && su -c 'psql -l' postgres 2>&1 >"$psql_my_out_fn"
+    )
+    [[ $buf != '' ]] && msg E "Error from cd or listing databases: $buf"
+    db_list=$(
+        cat "$psql_my_out_fn" \
+        | awk '{print $1}' \
+        | grep -vE '^-|^List|^Name|^\||\:|template[0|1]|^\('
+    )
+    db_list=$(echo $db_list)    # Make space-separated list
+
+    # Remove temporary directory for user postgres
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    rm -r "${tmp_dir_pg:-UNSET-GUARD}" || finalise 1
+
+    # Output
+    # ~~~~~~
+    out='---- psql -l ----'
+    out+=$'\n'$db_list
+    echo "$out" >> "$my_out_fn" || finalise 1
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function get_database_pg_info
+
+#--------------------------
+# Name: get_eth_hw_info
+# Purpose: gets Ethernet hardware information
+# Arguments: none used ($1 used for documentation)
+# Return code: always 0; does not return on error
+#--------------------------
+function get_eth_hw_info {
+    fct "${FUNCNAME[0]}" 'started'
+    local cmd line output state
+    local -r eth_ctl_regex='^[:\.[:digit:]]+ Ethernet controller:'
+    local -r wanted_line_regex='^[[:space:]]*(Capabilities: \[180\]|Kernel driver in use:)'
+    local -r stop_collecting_regex='^$'
+
+    # Ensure lspci is available
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~
+    cmd=lspci
+    if [[ $platform = DomU || ! -e /proc/bus/pci ]]; then
+        msg I "Command $cmd not functional"
+        fct "${FUNCNAME[0]}" 'returning 1'
+        return 1
+    fi
+    if ! hash "$cmd" &>/dev/null; then
+        msg I "Command $cmd not available"
+        fct "${FUNCNAME[0]}" 'returning 1'
+        return 1
+    fi
+
+    # Get the key information from lspci output
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    output=
+    state=ignoring
+    while read -r line
+    do
+       if [[ $line =~ $eth_ctl_regex ]]; then
+           state=collecting
+           output+=$'\n'"    $line"
+       fi
+       if [[ $state = collecting ]]; then
+           if [[ $line =~ $wanted_line_regex ]]; then
+               output+=$'\n'"    $line"
+           elif [[ $line =~ $stop_collecting_regex ]]; then
+               state=ignoring
+           fi
+       fi
+    done < <(lspci -v)
+
+    echo "${output#$'\n\n'}" >> "$my_out_fn" || finalise 1
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function get_eth_hw_info
+
+#--------------------------
+# Name: get_hdd_and_sdd_info
+# Purpose: gets HDD and SDD hardware information
+# Arguments: none used ($1 used for documentation)
+# Return code: always 0; does not return on error
+#--------------------------
+function get_hdd_and_sdd_info {
+    fct "${FUNCNAME[0]}" 'started'
+    local buf cmd output hdd msg smartctl_out smartctl_ver
+    local -r ignore_regex='Unknown USB bridge|Read Device Identity failed|Unable to detect device type'
+    local -r drbd_regex='^/dev/drbd'
+    local -r loop_regex='^/dev/loop'
+    local -r nvme_regex='^/dev/nvme'
+    local -r smartctl_out_regex='^smartctl [[:digit:]]+\.[[:digit:]]+ '
+
+    # Get smartctl version
+    # ~~~~~~~~~~~~~~~~~~~~
+    # Versions listed at https://www.smartmontools.org/wiki/News 
+    smartctl_out=$(smartctl --version 2>&1)
+    if [[ $smartctl_out =~ $smartctl_out_regex ]]; then
+        array=($smartctl_out)
+        smartctl_ver=${array[1]}
+        msg D "smartctl version: $smartctl_ver"
+    else
+        msg W "Unexpected smartctl --version output: $buf"
+        fct "${FUNCNAME[0]}" 'returning 1'
+        return 1
+    fi
+    smartctl_ver_maj=${smartctl_ver%.*}
+    smartctl_ver_min=${smartctl_ver#*.}
+
+    # For each HDD and SDD
+    # ~~~~~~~~~~~~~~~~~~~~
+    # In the absence of a word for both HDDs and SSDs, "hdd" is used for both
+    output=
+    for hdd in $(lsblk --nodeps --noheadings --output NAME,TYPE \
+        | grep -v 'rom$' | sed 's/disk$//'
+    )
+    do
+        hdd=/dev/$hdd
+        if [[ $hdd =~ $drbd_regex ]]; then
+            msg I "Not running smartctl on $hdd (not a physical HDD or SDD)"
+            continue
+        fi
+        if [[ $hdd =~ $loop_regex ]]; then
+            msg I "Not running smartctl on $hdd (a loopback device)"
+            continue
+        fi
+        if [[ $hdd =~ $nvme_regex ]]; then
+            # Version 6.0 was released in 2012, version 7.0 in 2018
+            if ((smartctl_ver_maj<7)) && ((smartctl_ver_min<5)) ; then
+                msg="Not running smartctl on $hdd"
+                msg I "$msg (need smartctl 6.5 or later for NVMe support)"
+                continue
+            fi
+        fi
+
+        cmd="smartctl -a $hdd"
+        msg I "Running $cmd"
+        output+=$'\n'"---- $cmd ----"
+        smartctl_out=$($cmd 2>&1)
+        buf=$(echo "$smartctl_out" \
+            | grep -E '^(Model Family|Device Model|Serial Number|User Capacity):'
+        )
+        if [[ $buf != '' ]]; then
+            output+=$'\n'$buf
+        elif [[ $smartctl_out =~ $ignore_regex ]]; then
+            msg I "Cannot get $hdd's information.  smartctl output:"$'\n'"$smartctl_out"
+        else
+            msg W "Unexpected output from $cmd: $smartctl_out"
+        fi
+    done
+
+    echo "${output#$'\n\n'}" >> "$my_out_fn" || finalise 1
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function get_hdd_and_sdd_info
+
+source "$BUNG_LIB_DIR/get_fs_type.fun" || exit 1
+
+#--------------------------
+# Name: get_groups_n_user_info
+# Purpose: gets groups and user information
+# Arguments: $1 index into sysinfo_ arrays
+# Return code: always 0; does not return on error
+#--------------------------
+function get_groups_n_user_info {
+    fct "${FUNCNAME[0]}" 'started'
+    local all_groups group_list unwanted_groups
+    local all_users user_list unwanted_users
+    local cmd i
+    local -r idx=$1
+
+    echo $'\n'"**** GROUPS AND USERS ****" >> "$my_out_fn" || finalise 1
+
+    # List all groups
+    # ~~~~~~~~~~~~~~~
+    cmd=(getent group)
+    msg I "Running ${cmd[*]}"
+    echo "---- ${cmd[*]} ----" >> "$my_out_fn" || finalise 1
+    "${cmd[@]}" >> "$my_out_fn" || finalise 1
+
+    # List any OpenLDAP groups
+    # ~~~~~~~~~~~~~~~~~~~~~~~~
+    all_groups=$(getent group | sed 's/:.*$//')
+    group_list=" $(echo ${all_groups[*]}) "    # Convert line ends to spaces
+    unwanted_groups=($(sed 's/:.*$//' < /etc/group))
+    for ((i=0;i<${#unwanted_groups[*]};i++))
+    do
+        unwanted_group=${unwanted_groups[i]}
+        group_list=${group_list/ $unwanted_group / }
+    done
+    echo === Of the above groups, these were OpenLDAP groups:$'\n'$group_list >> "$my_out_fn" || finalise 1
+
+    # List all users
+    # ~~~~~~~~~~~~~~~
+    cmd=(getent passwd)
+    msg I "Running ${cmd[*]}"
+    echo "---- ${cmd[*]} ----" >> "$my_out_fn" || finalise 1
+    "${cmd[@]}" >> "$my_out_fn" || finalise 1
+
+    # List any OpenLDAP users
+    # ~~~~~~~~~~~~~~~~~~~~~~~~
+    all_users=$(getent passwd | sed 's/:.*$//')
+    user_list=" $(echo ${all_users[*]}) "    # Convert line ends to spaces
+    unwanted_users=($(sed 's/:.*$//' < /etc/passwd))
+    for ((i=0;i<${#unwanted_users[*]};i++))
+    do
+        unwanted_user=${unwanted_users[i]}
+        user_list=${user_list/ $unwanted_user / }
+    done
+    echo ---- Of the above users, these were OpenLDAP users:$'\n'$user_list >> "$my_out_fn" || finalise 1
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function get_groups_n_user_info
+
+#--------------------------
+# Name: get_hw_info
+# Purpose: gets hardware information
+# Arguments: $1 index into sysinfo_ arrays (not used)
+# Return code: always 0; does not return on error
+#--------------------------
+function get_hw_info {
+    fct "${FUNCNAME[0]}" 'started'
+    local buf cmd cmds pipe_to rc
+    local -r function_regex=' function$'
+
+    echo $'\n'"**** HARDWARE ****" >> "$my_out_fn" || finalise 1
+    echo "Platform: $platform" >> "$my_out_fn" || finalise 1
+
+    # Build list of commands to run
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [[ $platform = hardware ]] && cmds+=(
+        'dmidecode --type 2'
+        "get_hdd_and_sdd_info $1"
+    )
+    cmds+=(
+        'cat /proc/cpuinfo'
+        "get_mem_info $1"
+        "get_eth_hw_info $1"
+    )
+
+    # Run the available commands
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    for cmd in "${cmds[@]}"
+    do
+        if ! hash "${cmd%% *}" &>/dev/null ; then
+            msg I "Command ${cmd%% *} not available"
+            continue
+        fi
+        cmd=($cmd)
+        pipe_to=
+        case $cmd in
+            'cat /proc/cpuinfo' )
+                pipe_to=(grep -E '^model name')
+                ;;
+        esac
+
+        buf=${cmd[*]}
+        if [[ $pipe_to = '' ]]; then
+            msg I "Running $buf"
+            if [[ $(type -t "${cmd%% *}") = function ]]; then
+                "${cmd[@]}"
+            else
+                echo "---- $buf ----" >> "$my_out_fn" || finalise 1
+                buf=$("${cmd[@]}" 2>&1 >> "$my_out_fn")
+                rc=$?
+                if [[ $buf != '' ]] || ((rc!=0)); then
+                    msg W "Unexpected rc or stderr from ${cmd[*]}}: rc: $rc, stderr: $buf"
+                fi
+            fi
+        else
+            msg I "Running $buf | ${pipe_to[*]}"
+            echo "---- $buf | ${pipe_to[*]} ----" >> "$my_out_fn" || finalise 1
+            buf=$("${cmd[@]}" 2>&1)
+            rc=$?
+            if ((rc!=0)); then
+                msg W "Unexpected rc $rc from ${cmd[*]}}, output: $buf"
+            else
+                buf=$("${pipe_to[@]}" <(echo "$buf"))
+                rc=$?
+                if ((rc!=0)); then
+                    msg W "Unexpected rc $rc, from ${pipe_to[*]}"
+                else
+                    echo "$buf" >> "$my_out_fn" || finalise 1
+                fi
+            fi
+        fi
+    done
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function get_hw_info
+
+#--------------------------
+# Name: get_name_info
+# Purpose: gets the FQDN
+# Arguments: none
+# Globals: none
+# Return code: always 0; does not return on error
+#--------------------------
+function get_name_info {
+    fct "${FUNCNAME[0]}" 'started'
+
+    echo $'\n'"**** NAME AND OS ****" >> "$my_out_fn" || finalise 1
+
+    echo "---- hostname -f  ----" >> "$my_out_fn" || finalise 1
+    echo "$(hostname -f 2>&1)" >> "$my_out_fn" || finalise 1
+
+    # Record key files
+    # ~~~~~~~~~~~~~~~~
+    for in_fn in /etc/issue
+    do
+        if [[ -e "$in_fn" ]]; then
+            echo "---- $in_fn ----" >> "$my_out_fn" || finalise 1
+            grep -E -v '^[[:space:]]*#|^[[:space:]]*$' "$in_fn" >> "$my_out_fn" || finalise 1
+        else
+            echo "---- $in_fn does not exist ----" >> "$my_out_fn" || finalise 1
+        fi
+    done
+
+    # Run the available commands
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    for cmd in uname
+    do
+        if ! hash "$cmd" &>/dev/null; then
+            msg I "Command $cmd not found"
+            continue
+        fi
+        cmd=("$cmd")
+        case $cmd in
+            uname )
+                cmd+=(--kernel-release --kernel-version)
+                ;;
+            * )
+                msg E "${FUNCNAME[0]}: programming error: unexpected cmd: '$cmd'"
+        esac
+
+        msg I "Running ${cmd[*]}"
+        echo "---- ${cmd[*]} ----" >> "$my_out_fn" || finalise 1
+        "${cmd[@]}" >> "$my_out_fn" || finalise 1
+    done
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function get_name_info
+
+#--------------------------
+# Name: get_platform
+# Purpose: gets the platform (hardware, DomU, LXC or VirtualBox)
+# Arguments: none
+# Globals: sets $platform
+# Return code: always 0; does not return on error
+#--------------------------
+function get_platform {
+    fct "${FUNCNAME[0]}" 'started'
+    local fn
+    local -r virtualbox_regex='innotek GmbH'
+
+    # The platform is commonly determined using dmidecode -s or lshw but
+    # they were not available in unprivileged LXCs
+
+    # Another common method is to parse dmesg's boot messages but they
+    # will have been lost from dmesg's ring buffer after significant uptime.
+
+    if grep --quiet 'container=lxc' /proc/1/environ; then
+        msg D '/proc/1/environ has container=lxc'
+        platform=lxc
+    elif [[ -e /proc/xen ]]; then
+        msg D '/proc/xen exists'
+        if [[ -e /proc/xen/capabilities ]]; then
+            msg D '/proc/xen/capabilities exists'
+            # The file contains control_d and a terminating new line but we have
+            # not seen the file except on DomUs so we do not check the content
+            platform=xen_dom0
+        else
+            msg D '/proc/xen/capabilities does not exist'
+            platform=xen_domu
+        fi
+    elif [[ $(cat /sys/class/dmi/id/sys_vendor 2>&1) =~ $virtualbox_regex ]]; then
+        msg D '/sys/class/dmi/id/sys_vendor has content for VirtualBox'
+        platform=virtualbox
+    else
+        # None of the supported virtualisations or containerisations were identified
+        # above so default to hardware
+        msg I 'No virtual or container fingerprints matched; defaulting to hardware'
+        platform=hardware   # Actual hardware and the hotspot VPS
+    fi
+
+    msg I "Platform: $platform"
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function get_platform
+
+#--------------------------
+# Name: get_mem_info
+# Purpose: gets memory information
+# Arguments: none used ($1 used for documentation)
+# Return code: always 0; does not return on error
+#--------------------------
+function get_mem_info {
+    fct "${FUNCNAME[0]}" 'started'
+    local cmd cmd_OK_flag line output state
+    local -r size_regex='^[[:space:]]*Size:'
+    local -r size_no_module_regex='^[[:space:]]*Size: No Module Installed'
+    local -r wanted_line_regex='^[[:space:]]*(Size|Bank Locator|Type|Speed|Manufacturer|Part Number):'
+
+    # Use dmidecode if available and functional
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    cmd=dmidecode
+    if [[ $platform = DomU ]]; then
+        msg I "Command $cmd not functional"
+        cmd_OK_flag=$false
+    elif ! hash "$cmd" &>/dev/null; then
+        msg I "dmidecode not available"
+        cmd_OK_flag=$false
+    else
+        cmd_OK_flag=$true
+    fi
+    if [[ $cmd_OK_flag ]]; then
+        # Get the key information from dmidecode's memory report
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        output+='---- dmidecode --type 17 (filtered) ----'
+        state=ignoring
+        while read -r line
+        do
+           if [[ $line =~ $size_regex ]]; then
+               if [[ $line =~ $size_no_module_regex ]]; then
+                   state=ignoring
+               else
+                   state=collecting
+                   output+=$'\n'
+               fi
+           fi
+           if [[ $state = collecting && $line =~ $wanted_line_regex ]]; then
+               output+=$'\n'"    $line"
+           fi
+        done < <(dmidecode --type 17)
+    else
+        output+="---- free ----"$'\n'"$(free 2>&1)"
+    fi
+    echo "${output#$'\n\n'}" >> "$my_out_fn" || finalise 1
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function get_mem_info
+
+#--------------------------
+# Name: get_network_info
+# Purpose: gets network information
+# Arguments: $1 index into sysinfo_ arrays
+# Return code: always 0; does not return on error
+#--------------------------
+function get_network_info {
+    fct "${FUNCNAME[0]}" 'started'
+    local cmd in_fn
+
+    echo $'\n'"**** NETWORK ****" >> "$my_out_fn" || finalise 1
+
+    # Run the available commands
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    for cmd in 'ip address' 'ip route' iptables-save 'nft list ruleset'
+    do
+        if ! hash "${cmd%% *}" &>/dev/null; then
+            msg I "Command $cmd not available"
+            continue
+        fi
+        msg I "Running $cmd"
+        echo "---- $cmd ----" >> "$my_out_fn" || finalise 1
+        $cmd >> "$my_out_fn" || finalise 1
+    done
+
+    # Record key files
+    # ~~~~~~~~~~~~~~~~
+    for in_fn in /etc/network/interfaces
+    do
+        [[ ! -e "$in_fn" ]] && continue
+        echo "---- $in_fn ----" >> "$my_out_fn" || finalise 1
+        cat "$in_fn" >> "$my_out_fn" || finalise 1
+    done
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function get_network_info
+
+#--------------------------
+# Name: get_package_info
+# Purpose: gets package information
+# Arguments: $1 index into sysinfo_ arrays
+# Return code: always 0; does not return on error
+#--------------------------
+function get_package_info {
+    fct "${FUNCNAME[0]}" 'started'
+    local cmd in_fn
+    local -r idx=$1
+
+    echo $'\n'"**** PACKAGES ****" >> "$my_out_fn" || finalise 1
+
+    # Run the available commands
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    if hash aptitude &>/dev/null; then
+        msg I 'Running aptitude pipleline'
+        echo '---- aptitude pipeline output ----' >> "$my_out_fn" || finalise 1
+        aptitude versions '~i!~M' \
+            | sed --regexp-extended \
+                -e '/^$/d' \
+                -e 's/^i   //' \
+                -e 's/^Package //' \
+                -e 's/ .*//' \
+            | sed -n '/:$/{N; s/\n/ /p }'  >> "$my_out_fn" || finalise 1
+    elif hash dpkg &>/dev/null; then
+        cmd=(dpkg --get-selections)
+        msg I "Running ${cmd[*]}"
+        echo "---- ${cmd[*]} ----" >> "$my_out_fn" || finalise 1
+        "${cmd[@]}" >> "$my_out_fn" || finalise 1
+    else
+        msg W 'Neither aptitude nor dpkg found'
+    fi
+
+    # Record key files
+    # ~~~~~~~~~~~~~~~~
+    for in_fn in /etc/default/grub
+    do
+        if [[ -e "$in_fn" ]]; then
+            echo "---- $in_fn ----" >> "$my_out_fn" || finalise 1
+            grep -E -v '^[[:space:]]*#|^[[:space:]]*$' "$in_fn" >> "$my_out_fn" || finalise 1
+        else
+            echo "---- $in_fn does not exist ----" >> "$my_out_fn" || finalise 1
+        fi
+    done
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function get_package_info
+
+#--------------------------
+# Name: get_storage_info
+# Purpose: gets storage information
+# Arguments: $1 index into sysinfo_ arrays
+# Return code: always 0; does not return on error
+#--------------------------
+function get_storage_info {
+    fct "${FUNCNAME[0]}" 'started'
+    local action buf cmd gpt_part_lister hdd hdd_list in_fn oIFS OK_flag part_table_type rc
+    local -r dos_part_lister=fdisk
+    local -r fdisk_gpt_regex='Disklabel type: gpt|WARNING: GPT'
+    local -r fdisk_unpartitioned_regex="doesn't contain a valid partition table"
+    local -r idx=$1
+    local -r loop_regex='^/dev/loop'
+    local -r part_lister_out_OK_regex='(^$|does not start on physical sector boundary)'
+    local -r vgs_regex='^[[:space:]]+VG[[:space:]]+#PV[[:space:]]+#LV[[:space:]]+#SN[[:space:]]+Attr[[:space:]]+VSize[[:space:]]+VFree'
+
+    echo $'\n'"**** STORAGE ****" >> "$my_out_fn" || finalise 1
+
+    # Run the available global block device commands
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    for cmd in blkid lsblk
+    do
+        # Workaround defective commands
+        [[ $platform = LXC && $cmd = blkid ]] && continue
+
+        # Skip unavailable commands
+        if ! hash "$cmd" &>/dev/null; then
+            msg I "Command $cmd not available"
+            continue
+        fi
+
+        # Run commands
+        cmd=("$cmd")
+        msg I "Running ${cmd[*]}"
+        buf=$("${cmd[@]}" 2>&1)
+        rc=$?
+        if ((rc==0)); then
+            echo "---- ${cmd[*]} ----" >> "$my_out_fn" || finalise 1
+            echo "$buf" >> "$my_out_fn" || finalise 1
+        else
+            msg W "Unexpected rc $rc from '${cmd[*]}', output: $buf"
+        fi
+    done
+
+    # Which utility to use to list GPT partition tables?
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # * parted lists GPT partition tables but is not installed by default
+    # * fdisk is always installed and generates nice output but early
+    #   versions do not support GPT.
+    #   fdisk is provided by either util-linux or util-linux-ng which have
+    #   different version number sequences so GPT capability is found by
+    #   searching the binary.
+    # * gdisk lists GPT partition tables but is not installed by default
+    # * /proc/partitions does not list exact sizes or enough detail
+    if ! grep  --quiet "doesn't support GPT" /sbin/fdisk; then
+        gpt_part_lister=fdisk
+    elif hash gdisk &>/dev/null; then
+        gpt_part_lister=gdisk
+    else
+        gpt_part_lister=
+        msg I "Neither GPT-compatible fdisk nor gdisk installed"
+    fi
+    msg D "gpt_part_lister: $gpt_part_lister"
+
+    # Report partitioning
+    # ~~~~~~~~~~~~~~~~~~~
+    # "hdd" includes SDD because there is no term for both yet.  "Raw disk
+    # device" is already taken for device files which bypass the kernel's cache.
+    # lsblk's "not holders or slaves" is too long and obscure.  So "hdd" it is
+    # for now.
+    # In LXCs fdisk and gdisk report nothing useful.
+    [[ ! $platform = LXC ]] \
+        && for hdd in $(lsblk --nodeps --noheadings --output NAME,TYPE \
+        | grep -v 'rom$' | sed 's/disk$//'
+    )
+    do
+        # What is the partition table type?
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        hdd=/dev/$hdd
+        if [[ $hdd =~ $loop_regex ]]; then
+            msg I "Not gettting partition table of $hdd (a loopback device)"
+            continue
+        fi
+        msg I "Getting the partition table type of $hdd"
+        buf=$(fdisk -l "$hdd" 2>&1)
+        if [[ $buf =~ $fdisk_unpartitioned_regex ]]; then
+            part_table_type=unpartitioned
+        elif [[ $buf =~ $fdisk_gpt_regex ]]; then
+            part_table_type=gpt
+        else
+            part_table_type=dos
+        fi
+        msg D "Partition table type of $hdd: $part_table_type"
+        case $part_table_type in
+            dos|gpt )
+                # List the partition table
+                # ~~~~~~~~~~~~~~~~~~~~~~~~
+                if [[ $part_table_type = dos ]]; then
+                    cmd=("$dos_part_lister" -l "$hdd")
+                elif [[ $part_table_type = gpt ]]; then
+                    if [[ $gpt_part_lister != '' ]]; then
+                        cmd=("$gpt_part_lister" -l "$hdd")
+                    else
+                        msg W "Neither GPT-compatible fdisk nor gdisk found"
+                        cmd=
+                    fi
+                fi
+                if [[ $cmd != '' ]]; then
+                    msg I "Running ${cmd[*]}"
+                    echo "---- ${cmd[*]} ----" >> "$my_out_fn" || finalise 1
+                    buf=$("${cmd[@]}" 2>&1 >> "$my_out_fn")
+                    [[ ! $buf =~ $part_lister_out_OK_regex ]] \
+                        && msg E "Command: ${cmd[*]}, output: $buf"
+                fi
+                ;;
+            unpartitioned )
+                echo "$hdd is not partitioned" >> "$my_out_fn" || finalise 1
+        esac
+    done
+
+    # md devices
+    # ~~~~~~~~~~
+    in_fn=/proc/mdstat
+    if [[ -e "$in_fn" ]]; then
+
+        # Record key files
+        # ~~~~~~~~~~~~~~~~
+        for in_fn in "$in_fn"
+        do
+            echo "---- $in_fn ----" >> "$my_out_fn" || finalise 1
+            cat "$in_fn" >> "$my_out_fn" || finalise 1
+        done
+    fi
+
+    # LVM
+    # ~~~
+    vgs >/dev/null 2>&1
+    if (($?!=127)); then
+        cmd=vgs
+        msg I "Running $cmd"
+        echo "---- $cmd ----" >> "$my_out_fn" || finalise 1
+        LVM_SUPPRESS_FD_WARNINGS= "$cmd" >> "$my_out_fn" || finalise 1
+
+        cmd=pvs
+        msg I "Running $cmd"
+        echo "---- $cmd ----" >> "$my_out_fn" || finalise 1
+        LVM_SUPPRESS_FD_WARNINGS= "$cmd" >> "$my_out_fn" || finalise 1
+
+        cmd=lvs
+        msg I "Running $cmd"
+        echo "---- $cmd ----" >> "$my_out_fn" || finalise 1
+        LVM_SUPPRESS_FD_WARNINGS= "$cmd" | sed 's/[[:space:]]*$//' \
+            >> "$my_out_fn" || finalise 1
+    fi
+
+    # File systems
+    # ~~~~~~~~~~~~
+    cmd=(df -hT --local --exclude-type=devtmpfs --exclude-type=tmpfs)
+    msg I "Running ${cmd[*]}"
+    run_cmd_with_timeout
+    rc=$?
+    case $rc in
+        0 )
+            echo "---- ${cmd[*]} ----" >> "$my_out_fn" || finalise 1
+            cat "$out_fn" >> "$my_out_fn" || finalise 1
+            ;;
+        1 )
+            msg W "rc:$(<"$rc_fn").  Output: $(<"$my_out_fn")"
+            ;;
+        2 )
+            msg W 'Timed out'
+            ;;
+    esac
+    for in_fn in /etc/fstab
+    do
+        echo "---- $in_fn ----" >> "$my_out_fn" || finalise 1
+        cat "$in_fn" >> "$my_out_fn" || finalise 1
+    done
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function get_storage_info
+
+source "$BUNG_LIB_DIR/usage.fun" || exit 1
+
+#--------------------------
+# Name: initialise
+# Purpose: sets up environment and parses command line
+#--------------------------
+function initialise {
+
+    # Declare locals
+    # Configure shell environment
+    # Initialise envars, globals and locals
+    # Parse command line
+    # Check the config file
+    # Check the PID directory
+    # Set up logging
+    # Set traps
+    # Create and lock the PID file
+    # Create temporary directory
+    source "$BUNG_LIB_DIR/initialise_1.scrippet" || exit 1
+
+    # Parse configuration file
+    # ~~~~~~~~~~~~~~~~~~~~~~~~
+    emsg=
+    local -A keyword_validation
+    keyword_validation[name]='
+        emailforreport
+        logretention
+        mount
+        organisationname
+        post_hook
+        pre_hook
+        sysinfo
+        shutdown
+        snapshot
+    '
+    keyword_validation[repeat invalid]='
+        logretention
+        organisationname
+        post_hook
+        pre_hook
+        sysinfo
+        shutdown
+    '
+    local +r keyword_validation
+    parse_conf "$conf_fn"
+    [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
+
+    # Postprocess and error trap the configuration
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    # Email for report
+    if [[ ! $subsidiary_mode_flag ]]; then
+        postprocess_email_for_report
+        err_trap_email_for_report
+    fi
+
+    # Log retention
+    err_trap_uint "$log_retention" "Invalid log retention value"
+
+    # Mount
+    postprocess_mount_conf
+    err_trap_mount_conf
+
+    # Organisation name
+    postprocess_org_name_conf "${org_name:-}" "${org_name_optarg:-}" "$opt_o_flag"
+
+    # Post-hook
+    err_trap_post_hook_conf
+
+    # Pre-hook
+    err_trap_pre_hook_conf
+
+    # sysinfo
+    err_trap_sysinfo_conf
+
+    # Shutdown
+    err_trap_shutdown
+
+    # Snapshot
+    postprocess_snapshot_conf && err_trap_snapshot_conf
+
+    [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
+
+    # Finish if -C option (check the configuration)
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [[ $conf_check_flag ]] \
+        && { msg I "Configuration check OK for $conf_fn"; finalise 0; }
+
+    # Create and lock the PID file
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    do_pid "$(printf '%q ' "${args[@]}")"
+
+    # Detect the platform
+    # ~~~~~~~~~~~~~~~~~~~
+    get_platform
+
+    fct "${FUNCNAME[0]}" 'returning'
+}  # end of function initialise
+
+source "$BUNG_LIB_DIR/msg.fun" || exit 1
+source "$BUNG_LIB_DIR/my_cat.fun" || exit 1
+source "$BUNG_LIB_DIR/parse_conf.fun" || exit 1
+
+#--------------------------
+# Name: parse_conf_sysinfo
+# Purpose:
+#   Parses an sysinfo line from the configuration file
+#   Note: does not error trap sub-values, only traps syntactical errors
+# Arguments:
+#   $1 - the keyword as read from the configuration file (not normalised)
+#   $2 - the value from the configuration file
+#   $3 - the configuration file line number
+# Global variable usage:
+#   Read:
+#       true and false
+#       line_n
+#   Set:
+#       sysinfo_idx incremented
+#       pc_emsg appended with any error message
+# Output: none except via function fct
+# Return value:
+#   0 when no error detected
+#   1 when an error is detected
+#--------------------------
+function parse_conf_sysinfo {
+    fct "${FUNCNAME[0]}" "started with keyword: ${1:-}, value: ${2:-}, line_n: ${3:-}"
+    local buf dest idx msg my_rc src
+
+    # Parse arguments
+    # ~~~~~~~~~~~~~~~
+    if (($#!=3)); then
+        msg="Programmming error: ${FUNCNAME[0]} called with $# arguments instead of 3"
+        msg E "$msg (args: $*)"
+    fi
+    local -r keyword=$1
+    local -r value=$2
+    local -r line_n=$3
+
+    # Initialise
+    # ~~~~~~~~~~
+    local -r initial_pc_emsg=$pc_emsg
+    unparsed_str=$value
+
+    # Set sub-keyword default values
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    idx=$((++sysinfo_idx))
+    dest_dirs[idx]=/var/backup/sysinfo
+    dest_dir_usage_warnings[idx]=80
+    backup_retention[idx]=28
+
+    # Get any sub-keyword values
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # The value format/syntax is one of:
+    #   sysinfo = [dest_dir=dir] [dest_dir_usage_warning=%] [retention=days]
+    local -A subkey_validation
+    subkey_validation[name]='
+        dest_dir
+        dest_dir_usage_warning
+        retention
+    '
+    subkey_validation[value required]='
+        dest_dir
+        dest_dir_usage_warning
+        retention
+    '
+    subkey_validation[value invalid]=' '
+    local +r subkey_validation
+    while [[ $unparsed_str != '' ]]
+    do
+       parse_conf_subkey_value "${FUNCNAME[0]}" $line_n
+    done
+    unset unparsed_str
+
+    [[ $pc_emsg = $initial_pc_emsg ]] && my_rc=0 || my_rc=1
+    fct "${FUNCNAME[0]}" "returning with rc $my_rc"
+    return $my_rc
+}  # end of function parse_conf_sysinfo
+
+source "$BUNG_LIB_DIR/parse_conf_word.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_email_for_report.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_mount_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_org_name_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/postprocess_snapshot_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/report_dest_dir_usage.fun" || exit 1
+source "$BUNG_LIB_DIR/run_cmd_with_timeout.fun" || exit 1
+source "$BUNG_LIB_DIR/run_pre_hooks.fun" || exit 1
+
+#--------------------------
+# Name: sysinfo_bu
+# Purpose: generates system information files
+# Arguments: none
+# Return code: always 0; does not return on error
+#--------------------------
+function sysinfo_bu {
+    fct "${FUNCNAME[0]}" 'started'
+    local array buf i find_pat msg_class my_out_fn
+    local dest_dir dest_dir_remote_flag dest_dir_usage_warning
+
+    for ((i=0;i<=sysinfo_idx;i++))
+    do
+        # Set up the output file
+        # ~~~~~~~~~~~~~~~~~~~~~~
+        my_out_fn=${dest_dirs[i]}/sysinfo.$(date "+$fn_date_format")
+        find_pat="${dest_dirs[i]}/sysinfo.*"
+
+        # Get each type of system information
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        get_name_info $i
+        get_hw_info $i
+        get_bios_info $i
+        get_storage_info $i
+        get_network_info $i
+        get_groups_n_user_info $i
+        get_database_mysql_info $i
+        get_database_pg_info $i
+        get_package_info $i
+
+        # Log the output file
+        # ~~~~~~~~~~~~~~~~~~~
+        msg I "The sysinfo_bu report:$msg_lf$(ls -l "$my_out_fn" 2>&1)"
+
+        # Remove old backups
+        # ~~~~~~~~~~~~~~~~~~
+        find "${find_pat%/*}" -maxdepth 1 -name "${find_pat##*/}" \
+            -mtime "+${backup_retention[i]}" -execdir rm {} \;
+
+        # Log the destination directory usage
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        dest_dir=${dest_dirs[i]}
+        dest_dir_remote_flag=$false
+        dest_dir_usage_warning=${dest_dir_usage_warnings[i]}
+        report_dest_dir_usage
+    done
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function sysinfo_bu
+
+source "$BUNG_LIB_DIR/usage.fun" || exit 1
+
+#--------------------------
+# Name: main
+# Purpose: where it all happens
+#--------------------------
+[[ ${BUNG_COMPGEN_DIR:-} != '' ]] && compgen -v >> $BUNG_COMPGEN_DIR/initial.vars
+initialise "${@:-}"
+do_snapshots
+do_mounts
+err_trap_sysinfo_files_and_dirs
+((pre_hook_idx>-1)) && run_pre_hooks
+sysinfo_bu
+finalise 0

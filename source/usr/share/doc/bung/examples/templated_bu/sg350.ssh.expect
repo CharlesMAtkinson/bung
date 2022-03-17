@@ -1,0 +1,17 @@
+#!/usr/bin/expect
+
+## TomDV
+## http://blog.penumbra.be/2010/02/expect-scripts-backup-cisco-config/
+
+# ---------------- configuration ---------------- #
+set switch_fqdn [lindex $argv 0]
+set tftp_server [lindex $argv 1]
+set timeout 55
+
+# -------------- do not edit below -------------- #
+spawn ssh $switch_fqdn
+
+expect "#"
+send "copy running-config tftp://$tftp_server/$switch_fqdn/config\n"
+expect "#"
+send "exit\n"

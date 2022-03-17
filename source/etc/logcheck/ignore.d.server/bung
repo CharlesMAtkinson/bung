@@ -1,0 +1,1 @@
+^\w{3} [ :[:digit:]]{11} [._[:alnum:]-]+ ((hotplug|mysql|openldap|postgres|rsync|super|sysinfo|templated)_bu|remote_agent)[^[]+\[[[:digit:]]*\]: (no problems detected|.* started on)

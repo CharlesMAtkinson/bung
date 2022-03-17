@@ -1,0 +1,112 @@
+# Copyright (C) 2020 Charles Atkinson
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+
+#--------------------------
+# Name: parse_conf_templated
+# Purpose:
+#   Parses a templated line from the configuration file
+#   Note: does not error trap sub-values, only traps syntactical errors
+# Arguments:
+#   $1 - the keyword as read from the configuration file (not normalised)
+#   $2 - the value from the configuration file
+# Global variable usage:
+#   Read:
+#       false
+#       line_n
+#       true
+#   Set:
+#       pc_emsg appended with any error message
+# Output: none except via function fct
+# Return value:
+#   0 when no error detected
+#   1 when an error is detected
+#--------------------------
+function parse_conf_templated {
+    fct "${FUNCNAME[0]}" "started with keyword: ${1:-}, value: ${2:-}, line_n: ${3:-}"
+    local buf dest msg my_rc src unparsed_str
+
+    # Parse arguments
+    # ~~~~~~~~~~~~~~~
+    if (($#!=3)); then
+        msg="Programmming error: ${FUNCNAME[0]} called with $# arguments instead of 3"
+        msg E "$msg (args: $*)"
+    fi
+    local -r keyword=$1
+    local -r value=$2
+    local -r line_n=$3
+
+    # Initialise
+    # ~~~~~~~~~~
+    local -r initial_pc_emsg=$pc_emsg
+    unparsed_str=$value
+
+    # Parse the subkeywords
+    # ~~~~~~~~~~~~~~~~~~~~~
+    # The syntax (any subkeyword order accepted) is:
+    #   templated =
+    #       template=<file>
+    #       [hostname=<FQDN>] [identity_file=<file>] [password=<password>] [username=<name>]
+    #       [device_type=<device type>]
+    #       [dest_dir=<dir>] [dest_dir_usage_warning=%] [retention=days]
+    #       [git_root=<dir>]
+    #       [tftp_root=<dir>] [tftp_server=<FQDN or IP address>]
+    #       [timeout=<duration>]
+    local -A subkey_validation
+    subkey_validation[name]='
+        dest_dir
+        dest_dir_usage_warning
+        device_type
+        git_root
+        hostname
+        identity_file
+        retention
+        password
+        template
+        tftp_root
+        tftp_server
+        timeout
+        username
+    '
+    subkey_validation[value_required]='
+        dest_dir
+        dest_dir_usage_warning
+        device_type
+        git_root
+        hostname
+        identity_file
+        password
+        retention
+        template
+        tftp_root
+        tftp_server
+        timeout
+        username
+    '
+    subkey_validation[value_invalid]=
+    local +r subkey_validation
+
+    templated_timeout=10
+    while [[ $unparsed_str != '' ]]
+    do
+       parse_conf_subkey_value "${FUNCNAME[0]}" $line_n
+    done
+    unset unparsed_str
+
+    [[ $pc_emsg = $initial_pc_emsg ]] && my_rc=0 || my_rc=1
+    fct "${FUNCNAME[0]}" "returning with rc $my_rc"
+    return $my_rc
+}  # end of function parse_conf_templated
+# vim: filetype=bash:

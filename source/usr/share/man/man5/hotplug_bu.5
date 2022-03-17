@@ -1,0 +1,125 @@
+.ig
+Copyright (C) 2021 Charles Atkinson
+
+Permission is granted to make and distribute verbatim copies of this
+manual provided the copyright notice and this permission notice are
+preserved on all copies.
+
+Permission is granted to copy and distribute modified versions of this
+manual under the conditions for verbatim copying, provided that the
+entire resulting derived work is distributed under the terms of a
+permission notice identical to this one.
+
+Permission is granted to copy and distribute translations of this
+manual into another language, under the above conditions for modified
+versions, except that this permission notice may be included in
+translations approved by the Free Software Foundation instead of in
+the original English.
+..
+.\" No adjustment (ragged right)
+.na
+.TH hotplug_bu 5 "17 Mar 2022" "Auroville" "Version 3.2.2"
+.SH NAME
+hotplug_bu \- configuration for bung's hotplug_bu script
+.SH SYNOPSIS
+.HP
+\fBEmail for report\fB\~=\~\fI... 
+.HP
+\fBHotplug device\~=\~device_path \fR[\fBmissing_device_message_class=information|warning|error\fR] \fR[\fBnotification_email=\fIemail_address\fR] \fR[\fBemail_wait=\fIseconds\fR] \fR[\fBnotification_screen\fR]
+.HP
+\fBLog retention\fB\~=\~\fI... 
+.HP
+\fBMount\fB\~=\~\fI... 
+.HP
+\fBOrganisation name\fB\~=\~\fI... 
+.HP
+\fBPre-hook\fB\~=\~\fI... 
+.HP
+\fBPost-hook\fB\~=\~\fI... 
+.HP
+\fBSnapshot\fB\~=\~\fI... 
+.HP
+\fBShutdown\fB\~=\~\fI... 
+.HP
+\fBSubsidiary script\fB\~=\~\fI... 
+.HP
+.SH DESCRIPTION
+This page describes the keywords specific to hotplug_bu
+.P
+The \fBbung-common\fR (5) man page describes
+the configuration file format
+and the common keywords ellipsised in the \fBSYNOPSIS\fR above
+.SH OPTIONS (keywords)
+.TP
+Hotplug device
+.RS
+.HP
+.nh
+\fBHotplug device\~=\~device_path \fR[\fBmissing_device_message_class=information|warning|error\fR] \fR[\fBnotification_email=\fIemail_address\fR] \fR[\fBemail_wait=\fIseconds\fR] \fR[\fBnotification_screen\fR]
+.P
+Required
+.P
+\fBdevice_path\fR is the path for the hotplug device.
+.br
+Normally it is a symlink created by a udev rule created when configuring
+the device for bung.
+More information in the bung user guide.
+.P
+\fBmissing_device_message_class\fR sets the message class to be used when the
+hotplug device is not present.
+.br
+The value is ignored when hotplug_bu is called by udev
+(via hotplug_bu_launcher) in which case a missing hotplug device always
+generates an error message.
+.br
+\~\~\~\~Default: warning
+.P
+\fBnotification_email\fR is the email address to send notifications to.
+.br
+Notifications are explained below.
+.br
+This sub-keyword is intended for use when the hotplug device is plugged
+into a computer without a visual display screen or with nobody normally
+watching it.
+.P
+\fBemail_wait\fR is how long to wait after sending a notification email before
+using the hotplug device.
+.br
+Intended to allow time for the email to be received and read.
+.br
+\~\~\~\~Default: 0 when notification_screen is confiigured, otherwise 600.
+.P
+\fBnotification_screen\fR enables notifications on the local visual display screen.
+.br
+Notifications are explained below.
+.br
+Intended for use when the hotplug device is plugged into a computer with a
+visual display screen with a user normally watching it.
+.br
+\~\~\~\~Default: no notifications on screen.
+.P
+\fBNote on notifications\fR
+.br
+The initial notification advises that the hotplug device is in use and should
+not be unplugged.
+.br
+The final notification either advises that the hotplug device is no longer in
+use and can be unplugged or that it should not be unplugged because
+one or more a file systems on it are mounted.
+.RE
+.
+.SH ENVIRONMENT
+Environment variables are described in bung-common (5).
+.SH FILES
+Default directories are described in bung-common (5).
+.SH EXAMPLES
+Example hotplug_bu configuration files are
+normally installed in /usr/share/bung/doc/examples
+.SH AUTHOR
+Charles Atkinson bung@charlesmatkinson.org
+.SH SEE ALSO
+\fBbung-common\fR(5 and 8),
+\fBhotplug_bu\fR(8)
+.br
+The bung user guide,
+normally installed in /usr/share/bung/doc

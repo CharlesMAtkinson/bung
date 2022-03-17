@@ -1,0 +1,3 @@
+#!/bin/bash
+# Remove bung logs more than four months old
+[[ -d /var/log/bung ]] && find /var/log/bung/ -maxdepth 1 -name '*.log' -mtime +122 -execdir rm {} \+

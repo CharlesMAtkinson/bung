@@ -1,0 +1,176 @@
+.ig
+Copyright (C) 2022 Charles Atkinson
+
+Permission is granted to make and distribute verbatim copies of this
+manual provided the copyright notice and this permission notice are
+preserved on all copies.
+
+Permission is granted to copy and distribute modified versions of this
+manual under the conditions for verbatim copying, provided that the
+entire resulting derived work is distributed under the terms of a
+permission notice identical to this one.
+
+Permission is granted to copy and distribute translations of this
+manual into another language, under the above conditions for modified
+versions, except that this permission notice may be included in
+translations approved by the Free Software Foundation instead of in
+the original English.
+..
+.\" No adjustment (ragged right)
+.na
+.TH bung-common 8 "17 Mar 2022" "Auroville" "Version 3.2.2"
+.SH NAME
+bung \- common options for most bung scripts
+.SH SYNOPSIS
+\fB-c\~\fIconf
+\fR[\fB-C\fR]
+\fR[\fB-d\fR]
+\fR[\fB-h\fR]
+\fR[\fB-L\~\fIlog_dir\fR]
+\fR[\fB-l\~\fIlog_file\fR]
+\fR[\fB-o\~\fIorganisation\fR]
+\fR[\fB-p\~\fIpath\fR]
+\fR[\fB-p\fR]
+\fR[\fB-s\fR]
+\fR[\fB-t\~\fItmp_dir\fR]
+\fR[\fB-v\fR]
+\fR[\fB-w\fR]
+.SH DESCRIPTION
+backup scripts next generation (bung) is a suite of bash scripts that runs standard backup utilities such as mysqldump, rsync, slapcat and tar.  It adds configurable support for hotplug storage devices (such as USB disks), LVM snapshots, file system mounting, logging, on-screen notifications and report emails.
+.P
+This man page describes options used by several bung scripts.
+Each script's specific options and a list of which common options it
+accepts are described in its man 8 page.
+.SH OPTIONS
+.TP
+-c
+.RS
+.nh
+Configuration file name.
+If it does not start with /
+it is relative to the bung configuration directory,
+/etc/bung for root or ~/etc/bung for others
+unless overriden by the BUNG_ETC_DIR environment variable.
+.RE
+.
+.TP
+-C
+.RS
+.nh
+Check the configuration file and exit.
+.RE
+.
+.TP
+-d
+.RS
+.nh
+Enable debug logging.
+.RE
+.
+.TP
+-h
+.RS
+.nh
+Print help and exit.
+.RE
+.
+.TP
+-L
+.RS
+.nh
+Log directory.
+.br
+Default /var/log/bung for root or ~/var/log/bung for others
+unless overriden by the BUNG_LOG_DIR environment variable.
+.RE
+.
+.TP
+-l
+.RS
+.nh
+Log file.
+.br
+To log to screen, use \fB-l/dev/tty\fR
+.br
+Default [~]/var/log/bung/\fIscript\fR.\fIconfig\fR.\fItimestamp\fR.log
+.RE
+.
+.TP
+-o
+.RS
+.nh
+Organisation name.
+.br
+Required if not in the configuration file.
+.br
+Overrides any value in the configuration file.
+.RE
+.
+.TP
+-p
+.RS
+.nh
+PATH environment variable to run the script with.
+.br
+Default /usr/sbin:/sbin:/usr/bin:/bin
+.RE
+.
+.TP
+-s
+.RS
+.nh
+Enables subsidiary mode.
+.br
+In subsidiary mode, the script does not finalise the log or send a report email.
+.RE
+.
+.TP
+-t
+.RS
+.nh
+Temporary directory root
+.br
+Default /run/bung for root or ~/run/bung for others
+unless overriden by the BUNG_TMP_DIR environment variable.
+.br
+The PID file is created in this directory too.
+.RE
+.
+.TP
+-v
+.RS
+.nh
+Print the script's version and exit.
+.RE
+.
+.TP
+-w
+.RS
+.nh
+Windows; make the log file name Windows FAT and NTFS compatible.
+.RE
+.
+.SH ENVIRONMENT
+Environment variables are described in bung-common (5).
+.SH FILES
+Default directories are described in bung-common (5).
+.SH AUTHOR
+Charles Atkinson bung@charlesmatkinson.org
+.SH SEE ALSO
+\fBcheck_hotplug_usage\fR(5\~and\~8),
+\fBbung-common\fR(5),
+\fBhotplug_bu\fR(5\~and\~8),
+\fBhotplug_bu_launcher\fR(5 and 8),
+\fBmysql_bu\fR(5\~and\~8),
+\fBopenldap_bu\fR(5 and 8),
+\fBpostgres_bu\fR(5 and 8),
+\fBrsync_bu\fR(5\~and\~8),
+\fBrsync_restore\fR(8),
+\fBsuper_bu\fR(5\~and\~8),
+\fBsysinfo_bu\fR(5\~and\~8),
+\fBtemplated_bu\fR(5\~and\~8),
+\fBtemplate_file\fR(5),
+\fBvalidate_ssh_cmd\fR(8)
+.br
+The bung user guide,
+normally installed in /usr/share/bung/doc

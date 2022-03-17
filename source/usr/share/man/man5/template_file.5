@@ -1,0 +1,379 @@
+.ig
+Copyright (C) 2021 Charles Atkinson
+
+Permission is granted to make and distribute verbatim copies of this
+manual provided the copyright notice and this permission notice are
+preserved on all copies.
+
+Permission is granted to copy and distribute modified versions of this
+manual under the conditions for verbatim copying, provided that the
+entire resulting derived work is distributed under the terms of a
+permission notice identical to this one.
+
+Permission is granted to copy and distribute translations of this
+manual into another language, under the above conditions for modified
+versions, except that this permission notice may be included in
+translations approved by the Free Software Foundation instead of in
+the original English.
+..
+.\" No adjustment (ragged right)
+.na\" No adjusting text
+.nh\" No hyphenation
+.TH template_file 5 "17 Mar 2022" "Auroville" "Version 3.2.2"
+.SH NAME
+bung \- templated_bu template file format
+.SH SYNOPSIS
+\fB<variable name>\~=\~\fB<variable value>\fR
+.br
+\fBTimeout: \fB<duration>\fR
+.br
+\fBOK rc list: \fB<rc test list>\fR
+.br
+\fBWarning rc list: \fB<rc test list>\fR
+.br
+\fBError rc list: \fB<rc test list>\fR
+.br
+\fBOK regex: \fB<regular expression>\fR
+.br
+\fBWarning regex: \fB<regular expression>\fR
+.br
+\fBError regex: \fB<regular expression>\fR
+.br
+\fB<command>\fR
+.SH DESCRIPTION
+This man page describes the template file format
+for bung script templated_bu
+.SH OPTIONS (file format)
+Lines beginning with #, empty lines and lines containing only spaces and tabs are ignored.
+.br
+The remaining lines must have one of the following nine syntaxes.
+.TP
+Assignment
+.RS
+\fB<variable name>\~=\~\fB<variable value>\fR
+.P
+Optional; no default; may appear several times.
+.P
+Tokens are substituted by their values.
+More in the "OPTIONS (tokens)" section below.
+.P
+\fB<variable name>\fR
+.P
+Valid names: _[a-zA-Z0-9_]+
+(underscore folllowed by one or more ASCII alphanumerics)
+.P
+\fB<variable value>\fR is everything 
+after any whitespace following the = 
+and up to the end of the line.
+.P
+No quoting or escaping is supported.
+.RE
+.
+.TP
+Timeout
+.RS
+\fBTimeout: \fB<duration>\fR
+.P
+Optional.
+Applies to the next command.
+.P
+Default: the Timeout specified or defaulted in
+the templated_bu configuration file.
+Documented in the templated_bu(5) man page.
+.P
+If you want a default to apply to all commands, set it in the
+the templated_bu configuration file.
+.P
+\fB<duration>\fR specifies the time allowed for the command to run
+before exiting with an error.
+It is a floating point number with an optional suffix
+as specified in the \fBtimeout\fR man page:
+.br
+\fBs\fR for seconds (default)
+.br
+\fBm\fR for minutes
+.br
+\fBh\fR for hours
+.br
+\fBd\fR for days
+.RE
+.
+.TP
+rc (return code) lists
+.RS
+\fBOK rc list: \fB<rc test list>\fR
+.br
+\fBWarning rc list: \fB<rc test list>\fR
+.br
+\fBError rc list: \fB<rc test list>\fR
+.br
+.P
+Optional.
+Applies to the next command.
+.P
+Default: when none of the "rc list" lines are used,
+the command's return code is ignored.
+.P
+\fB<rc test list>\fR format:
+.br
+One or more of > < >= <= != == followed by an unsigned integer and
+separated by commas.
+.P
+Example:
+.br
+Error rc list: >8,==2
+.P
+Effect:
+.IP \(bu 4
+If \fBError rc list\fR was used and
+one of its rc list comparisons matches the command's return code,
+an error message is generated.
+.IP \(bu 4
+Else if \fBWarning rc list\fR was used and
+one of its rc list comparisons matches the command's return code,
+a warning message is generated.
+.IP \(bu 4
+if \fBOK rc list\fR was used and
+none of its rc list comparisons matches the command's return code:
+.IP \(bu 8
+Else if \fBError rc list\fR was used,
+a warning message is generated.
+.IP \(bu 8
+Else
+an error message is generated.
+.RE
+.
+.TP
+Output regular expressions
+.RS
+\fBOK regex: \fB<regular expression>>\fR
+.br
+\fBWarning regex: \fB<regular expression>\fR
+.br
+\fBError regex: \fB<regular expression>>\fR
+.br
+.P
+Optional.
+Applies to the next command.
+.P
+Default: when none of the regex lines are used,
+the command's output is ignored.
+.P
+\fB<regular expression>\fR format:
+Extended regular expression (ERE)
+as documented in the section 7 regex man page.
+.P
+Example:
+.br
+OK regex: ^$
+.P
+Effect:
+.IP \(bu 4
+If \fBError regex\fR was used and
+it matches the command's return code,
+an error message is generated.
+.IP \(bu 4
+Else if \fBWarning regex\fR was used and
+it matches the command's return code,
+a warning message is generated.
+.IP \(bu 4
+if \fBOK regex\fR was used and
+nit matches the command's return code:
+.IP \(bu 8
+Else if \fBError regex\fR was used,
+a warning message is generated.
+.IP \(bu 8
+Else
+an error message is generated.
+.RE
+.
+.TP
+Command
+.RS
+\fB<command>\fR
+.P
+Optional but nothing is done if there are no commands; may appear several times.
+.P
+Tokens are substituted by their values.
+More in the "OPTIONS (tokens)" section below.
+.P
+No quoting or escaping is supported.
+.RE
+.
+.TP
+.RE
+.SH OPTIONS (tokens)
+.P
+Token values are defined in templated_bu's configuration file 
+except for tmp_dir (defined internally by templated_bu)
+and any variables defined by assignments in the template file.
+.P
+Tokens are identified in the template file by %-quoted names,
+for example %tmp_dir%.
+.P
+The tokens are:
+.RS
+\fBdest_dir\fB\fR
+.P
+If present, after running the commands in the template file, 
+templated_bu will remove any files
+in the <dest_dir> tree older than the
+configured age.
+.P
+.RE
+.RS
+\fBdevice_type\fB\fR
+.P
+Can be used as a device type to allow a templete to support multiple device types,
+for example by naming an expect script
+.P
+.RE
+.RS
+\fBgit_root\fB\fR
+.P
+If present, after running the commands in the template file, 
+templated_bu will change to the \fBgit_root_dir\fB\fR directory 
+and run git commands to add all files, commit and push.
+.P
+.RE
+.RS
+\fBhostname\fB\fR
+.P
+Can be used as an actual FQDN or an ssh host defined in ~/.ssh/config
+.P
+.RE
+.RS
+\fBidentity_file\fB\fR
+.P
+Can be used as an ssh private key file.
+.P
+.RE
+.RS
+\fBpassword\fB\fR
+.P
+Can be used as a password.
+.P
+.RE
+.RS
+\fBtemplate\fB\fR
+.P
+The name of the template file.
+.P
+.RE
+.RS
+\fBtftp_server\fB\fR and \fBtftp_root\fB\fR
+.P
+Can be used to name a TFTP server and directory.
+.P
+.RE
+.RS
+\fBtmp_dir\fB\fR
+.P
+A temporary directory created by templated_bu
+and removed when templated_bu finalises.
+.P
+.RE
+.RS
+\fBusername\fB\fR
+.P
+Can be used as an ssh username.
+.P
+.RE
+.RS
+.SH ENVIRONMENT
+Environment variables are not used in the template file
+.SH FILES
+Any git_root must have been set up as a working git repository
+along with any ~/.ssh/config host stanza required for it to work.
+.SH EXAMPLES
+Example bung configuration files are
+normally installed in /usr/share/bung/doc/examples
+.P
+templated_bu configuration file (the templated line is a single line):
+.RS
+.P
+Organisation name = backup3.iciti.av
+.br
+templated = dest_dir=/home/nc/var/backup/mikrotik/non-git  git_root=/home/nc/var/backup/mikrotik/git   hostname=edge1.iciti.av  template=mikrotik.template
+.P
+.RE
+.P
+template file:
+.RS
+.P
+# Template file for bung's templated_bu
+.P
+# For backing up Mikrotik devices
+.P
+# Set convenience variables
+.br
+_git_subdir = %git_root%/%hostname%
+.br
+_dest_subdir = %dest_dir%/%hostname%
+.P
+# Ensure required directories
+.br
+OK rc list: ==0
+.br
+/usr/lib/bung/mikrotik.template.helper -D %_git_subdir% -t %tmp_dir%
+.br
+OK rc list: ==0
+.br
+/usr/lib/bung/mikrotik.template.helper -D %_dest_subdir% -t %tmp_dir%
+.P
+# Generate export file on device
+.br
+Timeout: 60
+.br
+ssh %hostname% export file=%hostname%.exported
+.P
+# Copy to git (exported files) tree
+.br
+OK regex: ^$
+.br
+scp -p -q %hostname%:/%hostname%.exported.rsc %_git_subdir%
+.P
+# Remove from router
+.br
+OK regex: ^$
+.br
+ssh %hostname% file remove %hostname%.exported.rsc
+.P
+# Remove the time of generation timestamp, troublesome in git
+.br
+OK rc list: ==0
+.br
+/usr/lib/bung/mikrotik.template.helper -e %_git_subdir%/%hostname%.exported.rsc -t %tmp_dir%
+.P
+# Generate backup ("binary") file on device
+.br
+Timeout: 20
+.br
+ssh %hostname% system backup save dont-encrypt=yes name=%hostname%
+.P
+# Copy to non-git tree
+.br
+OK regex: ^$
+.br
+scp -p -q %hostname%:/%hostname%.backup %_dest_subdir%/%hostname%.backup
+.P
+# Remove from router
+.br
+OK regex: ^$
+.br
+ssh %hostname% file remove %hostname%.backup
+.P
+# Backup files
+.br
+OK rc list: ==0
+.br
+/usr/lib/bung/mikrotik.template.helper -b %dest_dir%/%hostname% -r %hostname% -t %tmp_dir%
+.br
+
+.SH AUTHOR
+Charles Atkinson bung@charlesmatkinson.org
+.SH SEE ALSO
+\fBtemplated_bu\fR(5 and 8)
+.br
+The bung user guide,
+normally installed in /usr/share/bung/doc/

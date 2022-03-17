@@ -1,0 +1,23 @@
+# Configuration file for rsync
+
+# * Lines beginning with # and empty lines are ignored.
+# * The format is defined in the rsync man page under:
+#   1. --exclude-from=FILE
+#   2. FILTER RULES section (search for "filter rules allow")
+# * The pattern ** is not well documented.  It matches anything, including /
+#   whereas * does not match strings including a /
+
+# Example lines for Windows systems
+
+# These lines are useful when synchronising a complete NTFS drive.
+# "RECYCLER" is for XP systems and $RECYCLE.BIN is for Windows 7 systems.
+RECYCLER/
+$RECYCLE.BIN/
+System Volume Information/
+
+# Exclude any folders with the name shown somewhere in the path:
+# **/Downloads/
+# **/My Music/
+# **/My Pictures/
+# **/My Videos/
+
