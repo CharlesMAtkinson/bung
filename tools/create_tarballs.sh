@@ -577,7 +577,7 @@ function mk_installation_tarball {
     # Create the installation tarball
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     installation_tarball_fn=../bung_$version.installation.tgz
-    tar --create --directory=source --file="$installation_tarball_fn" --gzip . || finalise 1
+    tar --create --directory="$tmp_dir" --file="$installation_tarball_fn" --gzip . || finalise 1
     msg I "Created $installation_tarball_fn"
     
     fct "${FUNCNAME[0]}" 'returning'
