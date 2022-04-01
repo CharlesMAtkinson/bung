@@ -461,11 +461,10 @@ source "$BUNG_LIB_DIR/my_cat.fun" || exit 1
 #--------------------------
 function my_mysqldump {
     fct "${FUNCNAME[0]}" 'started'
-    local buf grep_out mysqldump_cmd emsg msg mysql_ver mysql_ver_maj
-    local mysql_ver_min mysql_dump_compressed_fn tmp_fn unmatched_excludes
+    local buf emsg msg 
+    local grep_out mysqldump_cmd mysql_dump_compressed_fn tmp_fn unmatched_excludes
     local -r sevenzip_regex=7z
     local -r bzip_regex=bzip
-    local -r mysqldump_version_regex='^mysqldump +Ver [0-9\.]+ Distrib [0-9a-zA-Z\.\-]+,'
     local -r mysqldump_warning_regex=warning
     local -r mysqldump_error_regex='access denied|\(errcode: [[:digit:]]+\)|error[: ]'
     local my_rc=0
@@ -500,30 +499,6 @@ function my_mysqldump {
     fi
     [[ $unmatched_excludes != '' ]] \
         && msg W "Database(s) from 'exclude=' but not present:${unmatched_excludes/ /,}"
-
-    # Determine the version of MySQL
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # Sample outputs:
-    # * mysqldump  Ver 10.9 Distrib 4.1.24, for unknown-linux-gnu (x86_64)
-    # * mysqldump  Ver 10.13 Distrib 5.1.66, for debian-linux-gnu (x86_64)
-    # * mysqldump  Ver 10.13 Distrib 5.5.29, for Linux (x86_64)
-    # * mysqldump  Ver 10.13 Distrib 5.5.33, for debian-linux-gnu (x86_64)
-    # * mysqldump  Ver 10.13 Distrib 5.5.35, for debian-linux-gnu (i686)
-    # * mysqldump Ver 10.13 Distrib 5.5.47, for debian-linux-gnu (x86_64)
-    # * mysqldump Ver 10.15 Distrib 10.0.23-MariaDB, for debian-linux-gnu (x86_64)
-    buf=$(mysqldump --version 2>&1)
-    if [[ $buf =~ $mysqldump_version_regex ]]; then
-        buf=${buf%%,*}
-        buf=${buf##* }
-        mysql_ver=${buf%.*}
-        msg D "MySQL version: $mysql_ver"
-    else
-        msg W "Unexpected mysqldump --version output: $buf"
-        msg I "Assuming MySQL version 5.5"
-        mysql_ver=5.5
-    fi
-    mysql_ver_maj=${mysql_ver%.*}
-    mysql_ver_min=${mysql_ver#*.}
 
     # Back up each database in turn
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -573,7 +548,6 @@ function my_mysqldump {
 
         # Build the mysqldump command
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # The mysqldump (version 5.5.29) man page says:
         # * --flush-privileges ... This option should be used any time the dump
         #     contains the mysql database ...
         # * --events  Include Event Scheduler events for the dumped databases
@@ -581,8 +555,7 @@ function my_mysqldump {
         mysqldump_cmd=(mysqldump)
         mysqldump_cmd+=("--defaults-file=$defaults_fn")
         mysqldump_cmd+=(--hex-blob)
-        [[ $db = mysql ]] && ((${mysql_ver%.*}>=5)) \
-            && mysqldump_cmd+=(--events --flush-privileges)
+        [[ $db = mysql ]] && mysqldump_cmd+=(--events --flush-privileges)
         mysqldump_cmd+=(--single-transaction)
         mysqldump_cmd+=("$db")
 

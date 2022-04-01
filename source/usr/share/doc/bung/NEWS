@@ -1,4 +1,11 @@
 --------------------------------------------------------------------------------
+Version 3.2.3  29 Mar 2022
+
+* Logging: "Exit code 0 from subsidiary script" is logged twice
+* initialise_1.scrippet: export LANG=en_GB.UTF-8: too specific
+* mysql_bu: remove MariaDB version detection
+
+--------------------------------------------------------------------------------
 Version 3.2.2  17 Mar 2022
 
 * Bug #13511 "rsync_bu: hangs when there's no known_hosts entry for the remote host" bugfix

@@ -96,7 +96,6 @@ function run_subsidiary_scripts {
         msg I "Running subsidiary script by command:$msg_lf$(printf '%q ' "${cmd[@]}")"
         buf=$("${cmd[@]}" 2>&1)
         exit_code=$?
-        msg I "Exit code $exit_code from subsidiary script"
         if [[ $buf != '' ]]; then
             # There should be no stdout or stderr from the scripts.
             # Exit code 126 means the script was not executable.

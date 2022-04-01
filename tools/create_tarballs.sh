@@ -16,15 +16,14 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
 
-# Purpose: creates tarballs
-#   * A tarball of the source directory less any files matching .git/info/exclude patterns
-#     bung_<version>.source.tgz
-#   * A tarball to install from using the User Guide "From tarball" procedure
-#     bung_<version>.installation.tgz
-#   * A tarball to be used in Debian package creation as the upstream source tarball being the same as the source tarball
-#     plus .htm and .pdf versions of the .odt files
-#     bung_<version>.orig.tar.gz
-#   * The tarballs are created in the current directory's parent directory
+# Purpose: creates tarballs in the current directory's parent directory
+#   * Name: bung_<version>.source.tgz
+#     The source directory less any files matching .git/info/exclude patterns
+#   * Name: bung_<version>.source_with_htm_and_pdf.tgz
+#     As above plus .htm and .pdf versions of the .odt files
+#   * Name: bung_<version>.installation.tgz
+#     As above with the man pages compressed
+#     To install from using the User Guide "From tarball" procedure
 
 # Usage:
 #   See usage.fun or use -h option
@@ -36,28 +35,30 @@
 #    |   |
 #    |   +-- usage
 #    |
-#    +-- mk_source_tarball
-#    |
-#    +-- mk_installation_tarball
-#    |
-#    +-- mk_source_tarball_for_debian
+#    +-- mk_tarballs
+#    |   |
+#    |   +-- mk_htm_and_pdf_from_odts
+#    |       |
+#    |       +-- mk_htm_and_pdf_from_odt
+#    |           |
+#    |           +-- mk_htm_or_pdf_from_odt
 #    |
 #    +-- finalise
 #
 # Utility functions called from various places:
-#    ck_file fct mk_htm_and_pdf_from_odt mk_htm_and_pdf_from_odts mk_htm_or_pdf_from_odt msg
+#    ck_file fct msg
 
 # Function definitions in alphabetical order.  Execution begins after the last function definition.
 
 #--------------------------
 # Name: ck_file
-# Purpose: for each file listed in the argument list: checks that it is 
+# Purpose: for each file listed in the argument list: checks that it is
 #   * reachable and exists
 #   * is of the type specified (block special, ordinary file or directory)
 #   * has the requested permission(s) for the user
 #   * optionally, is absolute (begins with /)
 # Usage: ck_file [ path <file_type>:<permissions>[:[a]] ] ...
-#   where 
+#   where
 #     file  is a file name (path)
 #     file_type  is b (block special file), f (file) or d (directory)
 #     permissions  is none or more of r, w and x
@@ -74,7 +75,7 @@
 #     stderr
 #   * For the first detected programminng error, a message to
 #     stderr
-# Returns: 
+# Returns:
 #   0 when all files have the requested properties
 #   1 when at least one of the files have the requested properties
 #   2 when a programming error is detected
@@ -87,14 +88,14 @@ function ck_file {
     # ~~~~~~~~~~~~~~~~~
     retval=0
     while [[ $# -gt 0 ]]
-    do  
+    do
         file_name=$1
         file_type=${2%%:*}
         buf=${2#$file_type:}
         perms=${buf%%:*}
         absolute=${buf#$perms:}
         [[ $absolute = $buf ]] && absolute=
-        case $absolute in 
+        case $absolute in
             '' | a )
                 ;;
             * )
@@ -106,21 +107,21 @@ function ck_file {
         # Is the file reachable and does it exist?
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         case $file_type in
-            b ) 
+            b )
                 if [[ ! -b $file_name ]]; then
                     echo "file '$file_name' is unreachable, does not exist or is not a block special file" >&2
                     retval=1
                     continue
-                fi  
-                ;;  
-            f ) 
+                fi
+                ;;
+            f )
                 if [[ ! -f $file_name ]]; then
                     echo "file '$file_name' is unreachable, does not exist or is not an ordinary file" >&2
                     retval=1
                     continue
-                fi  
-                ;;  
-            d ) 
+                fi
+                ;;
+            d )
                 if [[ ! -d $file_name ]]; then
                     echo "directory '$file_name' is unreachable, does not exist or is not a directory" >&2
                     retval=1
@@ -185,7 +186,7 @@ function ck_file {
 # Purpose: checks for a valid unsigned integer
 # Usage: ck_uint <putative uint>
 # Outputs: none
-# Returns: 
+# Returns:
 #   0 when $1 is a valid unsigned integer
 #   1 otherwise
 #--------------------------
@@ -197,7 +198,7 @@ function ck_uint {
 #--------------------------
 # Name: fct
 # Purpose: function call trace (for debugging)
-# $1 - name of calling function 
+# $1 - name of calling function
 # $2 - message.  If it starts with "started" or "returning" then the output is prettily indented
 #--------------------------
 function fct {
@@ -227,14 +228,14 @@ function fct {
 # Purpose: cleans up and exits
 # Arguments:
 #    $1  exit code
-# Exit code: 
+# Exit code:
 #   When not terminated by a signal, the sum of zero plus
 #      1 when any warnings
 #      2 when any errors
 #   When terminated by a trapped signal, the sum of 128 plus the signal number
 #--------------------------
 function finalise {
-    fct "${FUNCNAME[0]}" "started with args $*" 
+    fct "${FUNCNAME[0]}" "started with args $*"
     local my_exit_code sig_name
 
     finalising_flag=$true
@@ -249,12 +250,12 @@ function finalise {
             if (($1<i)); then
                 my_exit_code=$1
                 sig_name=${sig_names[$1-128]}
-                msg I "Finalising on $sig_name" 
+                msg I "Finalising on $sig_name"
                 [[ ${summary_fn:-} != '' ]] \
-                    && echo "Finalising on $sig_name" >> "$summary_fn" 
+                    && echo "Finalising on $sig_name" >> "$summary_fn"
             else
-               msg="${FUNCNAME[0]} called with invalid exit value '${1:-}'" 
-               msg+=" (> max valid interrupt code $i)" 
+               msg="${FUNCNAME[0]} called with invalid exit value '${1:-}'"
+               msg+=" (> max valid interrupt code $i)"
                msg E "$msg"    # Returns because finalising_flag is set
             fi
         fi
@@ -264,29 +265,29 @@ function finalise {
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~
     if [[ ! $interrupt_flag ]]; then
         if [[ $warning_flag ]]; then
-            msg I "There was at least one WARNING" 
+            msg I "There was at least one WARNING"
             ((my_exit_code+=1))
         fi
         if [[ $error_flag ]]; then
-            msg I "There was at least one ERROR" 
+            msg I "There was at least one ERROR"
             ((my_exit_code+=2))
         fi
         if ((my_exit_code==0)) && ((${1:-0}!=0)); then
             my_exit_code=2
         fi
     else
-        msg I "There was a $sig_name interrupt" 
+        msg I "There was a $sig_name interrupt"
     fi
 
     # Remove temporary directory
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~
     [[ $tmp_dir_created_flag \
         && ${tmp_dir:-} =~ $tmp_dir_regex \
-    ]] && rm -fr "$tmp_dir" 
+    ]] && rm -fr "$tmp_dir"
 
     # Remove PID file
     # ~~~~~~~~~~~~~~~
-    [[ $pid_file_locked_flag ]] && rm "$pid_fn" 
+    [[ $pid_file_locked_flag ]] && rm "$pid_fn"
 
     # Exit
     # ~~~~
@@ -303,11 +304,16 @@ function initialise {
 
     # Configure shell environment
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    export LANG=en_GB.UTF-8
-    export LANGUAGE=en_GB.UTF-8
+    buf=$(locale --all-locales | grep 'en_.*utf8')
+    if [[ $buf = '' ]]; then
+        echo 'ERROR: locale --all-locales did not list any English UTF8 locales' >&2
+        exit 1
+    fi
+    export LANG=$(echo "$buf" | head -1)
+    export LANGUAGE=$LANG
     for var_name in LC_ADDRESS LC_ALL LC_COLLATE LC_CTYPE LC_IDENTIFICATION \
         LC_MEASUREMENT LC_MESSAGES LC_MONETARY LC_NAME LC_NUMERIC LC_PAPER \
-        LC_TELEPHONE LC_TIME 
+        LC_TELEPHONE LC_TIME
     do
         unset $var_name
     done
@@ -341,13 +347,12 @@ function initialise {
     declare -gr msg_lf=$'\n    '
     declare -gr my_name=${0##*/}
     declare -gr my_pid=$$
-    declare -gr pid_dir=/tmp
     declare -gr sig_names=(. $(kill -L | sed 's/[[:digit:]]*)//g'))
     declare -gr version_fn=source/usr/lib/bung/version.scrippet
 
     # Using variables set above
     declare -gr tmp_dir_mktemp_str=/tmp/$my_name.XXXXXX
-    declare -gr tmp_dir_regex="^/tmp/$my_name\..{6}\$" 
+    declare -gr tmp_dir_regex="^/tmp/$my_name\..{6}\$"
 
     # Initialise some global non-logic variables
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -356,9 +361,9 @@ function initialise {
     # Parse command line
     # ~~~~~~~~~~~~~~~~~~
     args=("$@")
-    args_org="$*" 
+    args_org="$*"
     emsg=
-    while getopts :dh opt "$@" 
+    while getopts :dh opt "$@"
     do
         case $opt in
             d )
@@ -370,7 +375,7 @@ function initialise {
                 exit 0
                 ;;
             * )
-                emsg+=$msg_lf"Invalid option '-$OPTARG'" 
+                emsg+=$msg_lf"Invalid option '-$OPTARG'"
         esac
     done
 
@@ -390,32 +395,26 @@ function initialise {
     # ~~~~~~~~~~~~~~~~~~~~~~~~
     shift $(($OPTIND-1))
     if [[ $* != '' ]]; then
-        emsg+=$msg_lf"Invalid extra argument(s) '$*'" 
+        emsg+=$msg_lf"Invalid extra argument(s) '$*'"
     fi
 
     # Report any command line errors
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     if [[ $emsg != '' ]]; then
         emsg+=$msg_lf'(-h for help)'
-        msg E "Command line error(s)$emsg" 
+        msg E "Command line error(s)$emsg"
     fi
-
-    # Check the PID directory
-    # ~~~~~~~~~~~~~~~~~~~~~~~
-    mkdir -p "$pid_dir" 2>/dev/null
-    buf=$(ck_file "$pid_dir" d:rwx: 2>&1)
-    [[ $buf != '' ]] && msg E "$buf" 
 
     # Report any errors
     # ~~~~~~~~~~~~~~~~~
     if [[ $emsg != '' ]]; then
-        msg E "$emsg" 
+        msg E "$emsg"
     fi
 
     # Set traps
     # ~~~~~~~~~
     for ((i=1;i<${#sig_names[*]};i++))
-    do   
+    do
         ((i==9)) && continue     # SIGKILL
         ((i==17)) && continue    # SIGCHLD
         trap "finalise $((128+i))" ${sig_names[i]#SIG}
@@ -426,12 +425,12 @@ function initialise {
     # If the mktemp template is changed, tmp_dir_regex in the finalise function
     # must be changed to suit
     buf=$(mktemp -d "/tmp/$my_name.XXXXXX" 2>&1)
-    if (($?==0)); then 
+    if (($?==0)); then
         tmp_dir=$buf
         tmp_dir_created_flag=$true
-        chmod 700 "$tmp_dir" 
+        chmod 700 "$tmp_dir"
     else
-        msg E "Unable to create temporary directory:$buf" 
+        msg E "Unable to create temporary directory:$buf"
     fi
 
     # Ensure in the root of the git working tree
@@ -544,61 +543,27 @@ function mk_htm_or_pdf_from_odt {
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Requred by POSIX and by Debian packaging
     [[ $out_fn_ext = .htm ]] && echo >> "$out_fn"
-    
+
     fct "${FUNCNAME[0]}" 'returning'
 }  # end of function mk_htm_or_pdf_from_odt
 
 #--------------------------
-# Name: mk_installation_tarball
-# Purpose: makes a tarball to be used when installing bung without a package
-#--------------------------
-function mk_installation_tarball {
-    fct "${FUNCNAME[0]}" 'started'
-    local installation_tarball_fn man_page_fn section
-
-    msg I 'Creating the installation tarball'
-
-    # Add .htm and .pdf versions of the .odt files
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # $tmp_dir was populated with the cleaned up source tree by function mk_source_tarball
-    mk_htm_and_pdf_from_odts
-
-    # Create compressed versions of man pages and remove uncompressed versions
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    for section in 5 8
-    do
-        for man_page_fn in $tmp_dir/usr/share/man/man$section/*.$section
-        do
-            gzip -9 --to-stdout "$man_page_fn" > "$man_page_fn.gz" || finalise 1
-            rm "$man_page_fn" 
-        done 
-    done
-
-    # Create the installation tarball
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    installation_tarball_fn=../bung_$version.installation.tgz
-    tar --create --directory="$tmp_dir" --file="$installation_tarball_fn" --gzip . || finalise 1
-    msg I "Created $installation_tarball_fn"
-    
-    fct "${FUNCNAME[0]}" 'returning'
-}  # end of function mk_installation_tarball
-
-#--------------------------
-# Name: mk_source_tarball
+# Name: mk_tarballs
 # Purpose: makes a tarball of the current source files
 #--------------------------
-function mk_source_tarball {
+function mk_tarballs {
     fct "${FUNCNAME[0]}" 'started'
-    local source_tarball_fn
+    local installation_tarball_fn source_tarball_fn source_tarball_with_htm_and_pdf_fn
+    local man_page_fn pattern section
 
-    msg I 'Creating the source tarball'
-
-    # Copy git source to the temporary directory
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Copy the source directory to the temporary directory
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    msg I 'Copying the source directory to the temporary directory'
     cp -pr source/. "$tmp_dir" || finalise 1
 
-    # Remove git excluded files
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Remove files matching .git/info/exclude patterns
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    msg I 'Removing files matching .git/info/exclude patterns'
     for pattern in $(
         grep --extended-regexp --invert-match '^[[:space:]]*#|^[[:space:]]*$' .git/info/exclude
     )
@@ -609,51 +574,42 @@ function mk_source_tarball {
     # Create the source tarball
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
     source_tarball_fn=../bung_$version.source.tgz
+    msg I "Creating source tarball $source_tarball_fn"
     tar --create --directory="$tmp_dir" --file="$source_tarball_fn" --gzip . || finalise 1
     msg I "Created $source_tarball_fn"
-    
-    fct "${FUNCNAME[0]}" 'returning'
-}  # end of function mk_source_tarball
-
-#--------------------------
-# Name: mk_source_tarball_for_debian
-# Purpose: makes a tarball of the current source files plus .htm and .pdf versions of .odt files
-#--------------------------
-function mk_source_tarball_for_debian {
-    fct "${FUNCNAME[0]}" 'started'
-    local source_tarball_for_debian_fn
-
-    msg I 'Creating the source tarball for Debian'
-
-    # Empty the temporary directory
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    rm -r "$tmp_dir"/* || finalise 1
-
-    # Copy git source to the temporary directory
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    cp -pr source/. "$tmp_dir" || finalise 1
-
-    # Remove git excluded files
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~
-    for pattern in $(
-        grep --extended-regexp --invert-match '^[[:space:]]*#|^[[:space:]]*$' .git/info/exclude
-    )
-    do
-        find "$tmp_dir" -name "$pattern" -execdir rm {} + || finalise 1
-    done
 
     # Add .htm and .pdf versions of the .odt files
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     mk_htm_and_pdf_from_odts
 
-    # Create the source tarball
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~
-    source_tarball_for_debian_fn=../bung_$version.orig.tar.gz
-    tar --create --directory="$tmp_dir" --file="$source_tarball_for_debian_fn" --gzip . || finalise 1
-    msg I "Created $source_tarball_for_debian_fn"
-    
+    # Create tarball of source plus .htm and .pdf versions of the .odt files
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    source_tarball_with_htm_and_pdf_fn=../bung_$version.source_with_htm_and_pdf.tgz
+    msg I "Creating tarball of source plus .htm and .pdf versions of the .odt files, $source_tarball_with_htm_and_pdf_fn"
+    tar --create --directory="$tmp_dir" --file="$source_tarball_with_htm_and_pdf_fn" --gzip . || finalise 1
+    msg I "Created $source_tarball_with_htm_and_pdf_fn"
+
+    # Create compressed versions of man pages and remove uncompressed versions
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    msg I 'Compressing the man pages'
+    for section in 5 8
+    do
+        for man_page_fn in $tmp_dir/usr/share/man/man$section/*.$section
+        do
+            gzip -9 --to-stdout "$man_page_fn" > "$man_page_fn.gz" || finalise 1
+            rm "$man_page_fn"
+        done
+    done
+
+    # Create the installation tarball
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    installation_tarball_fn=../bung_$version.installation.tgz
+    msg I "Creating installation tarball $installation_tarball_fn"
+    tar --create --directory="$tmp_dir" --file="$installation_tarball_fn" --gzip . || finalise 1
+    msg I "Created installation tarball $installation_tarball_fn"
+
     fct "${FUNCNAME[0]}" 'returning'
-}  # end of function mk_source_tarball_for_debian
+}  # end of function mk_tarballs
 
 #--------------------------
 # Name: msg
@@ -664,7 +620,7 @@ function mk_source_tarball_for_debian {
 # Global variables read:
 #     my_name
 # Output: information messages to stdout; the rest to stderr
-# Returns: 
+# Returns:
 #   Does not return (calls finalise) when class is E for error
 #   Otherwise returns 0
 #--------------------------
@@ -727,7 +683,7 @@ function usage {
 
     # Build the messages
     # ~~~~~~~~~~~~~~~~~~
-    usage="usage: $my_name " 
+    usage="usage: $my_name "
     msg='  where:'
     usage+='[-d] [-h]'
     msg+=$'\n    -d debugging on'
@@ -749,8 +705,6 @@ function usage {
 # Name: main
 # Purpose: where it all happens
 #--------------------------
-initialise "${@:-}" 
-mk_source_tarball
-mk_installation_tarball
-mk_source_tarball_for_debian
+initialise "${@:-}"
+mk_tarballs
 finalise 0
