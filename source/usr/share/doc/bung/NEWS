@@ -1,4 +1,9 @@
 --------------------------------------------------------------------------------
+Version 3.2.4  1 Apr 2022
+
+* Add "Backup scripts next generation Publisher's Guide"
+
+--------------------------------------------------------------------------------
 Version 3.2.3  29 Mar 2022
 
 * Logging: "Exit code 0 from subsidiary script" is logged twice
