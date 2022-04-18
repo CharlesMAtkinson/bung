@@ -426,9 +426,9 @@ function initialise {
 
     # Check mysqld is running
     # ~~~~~~~~~~~~~~~~~~~~~~~
-    buf=$(ps -ef | grep -E '/usr/sbin/mysql[d]( |$)' 2>&1)
+    buf=$(ps -ef | grep -E '/usr/sbin/(mariadbd|mysql[d]( |$))' 2>&1)
     if [[ $buf = '' ]]; then
-        msg E 'mysqld is not running'
+        msg E 'MySQL database is not running'
     fi
 
     # Create and lock the PID file

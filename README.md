@@ -20,6 +20,8 @@ Backup reports are sent by email.
 
 bung is written in bash and uses the GPL-2.0+ license.
 
+Full documentation is in source/usr/share/doc/bung
+
 ## Forking
 
 When forking, please read tools/git-store-meta/README-for-bung.md

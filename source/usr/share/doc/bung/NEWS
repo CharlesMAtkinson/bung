@@ -1,4 +1,9 @@
 --------------------------------------------------------------------------------
+Version 3.2.5  13 Apr 2022
+
+* mysql_bu and sysinfo_bu: update for Bullseye
+
+--------------------------------------------------------------------------------
 Version 3.2.4  1 Apr 2022
 
 * Add "Backup scripts next generation Publisher's Guide"

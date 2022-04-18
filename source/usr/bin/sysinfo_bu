@@ -1,6 +1,6 @@
 #! /bin/bash
 
-# Copyright (C) 2021 Charles Atkinson
+# Copyright (C) 2022 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -274,9 +274,9 @@ function get_database_mysql_info {
 
     # Nothing to do?
     # ~~~~~~~~~~~~~~
-    buf=$(ps -ef | grep -E '/usr/sbin/mysql[d]( |$)' 2>&1)
+    buf=$(ps -ef | grep -E '/usr/sbin/(mariadbd|mysql[d]( |$))' 2>&1)
     if [[ $buf = '' ]]; then
-        msg='mysqld is not running'
+        msg='MySQL database is not running'
         msg I "$msg"
         echo "$msg" >> "$my_out_fn" || finalise 1
         fct "${FUNCNAME[0]}" 'returning'
