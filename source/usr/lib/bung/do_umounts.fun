@@ -33,7 +33,7 @@
 #--------------------------
 function do_umounts {
     fct "${FUNCNAME[0]}" 'started'
-    local buf i j lsof_out mountpoint umounted_flag
+    local buf i j lsof_out mountpoint umounted_flag was_not_mounted_flag
     local -r not_mounted_regex='not mounted'
 
     # For each umount
@@ -46,6 +46,7 @@ function do_umounts {
         # Umount
         # ~~~~~~
         umounted_flag=$false
+        was_not_mounted_flag=$false
         #TODO: make the sleep length and the maximum loop count configurable?
         for ((j=0;j<30;j++))
         do   
@@ -58,7 +59,7 @@ function do_umounts {
                 break
             elif [[ $buf =~ $not_mounted_regex ]]; then
                 msg W "$mountpoint was not mounted"
-                umounted_flag=$true
+                was_not_mounted_flag=$true
                 break
             fi
             msg D "${FUNCNAME[0]}: umount failed on pass $j"
@@ -70,7 +71,7 @@ function do_umounts {
         # ~~~~~~~
         if [[ $umounted_flag ]]; then 
             msg I "Unmounted $mountpoint"
-        else 
+        elif [[ ! $was_not_mounted_flag ]]; then
             msg W "Problem unmounting $mountpoint: $buf"
             msg D "${FUNCNAME[0]}: lsof command argument: $(readlink --canonicalize-existing -- "$mountpoint")"
             # The grep -v is for a known lsof/.gvfs incompatibility reported as a bug at:

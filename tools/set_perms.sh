@@ -477,6 +477,7 @@ function set_perms {
     find -path ./.git -prune -o -type f -exec chmod 644 {} + || finalise 1
 
     executables=($(echo .git/hooks/{post-checkout,post-merge,pre-commit}))
+    executables+=(source/etc/cron.weekly/bung)
     executables+=($(echo source/usr/bin/{check_hotplug_usage,hotplug_bu,hotplug_bu_launcher,mysql_bu}))
     executables+=($(echo source/usr/bin/{openldap_bu,postgres_bu,remote_agent,rsync_bu,rsync_restore}))
     executables+=($(echo source/usr/bin/{super_bu,sysinfo_bu,templated_bu,validate_ssh_cmd}))

@@ -247,9 +247,10 @@ function finalise {
     else
         msg I "There was a $sig_name interrupt" 
     fi
+    msg I "Exiting with return value $my_exit_code"
 
-    # Final messages
-    # ~~~~~~~~~~~~~~
+    # Final messages (logger and email)
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     if [[ ! $subsidiary_mode_flag ]]; then
 
         # Non-subsidiary mode: syslog and report mail

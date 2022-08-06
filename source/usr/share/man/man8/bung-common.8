@@ -18,7 +18,7 @@ the original English.
 ..
 .\" No adjustment (ragged right)
 .na
-.TH bung-common 8 "13 Apr 2022" "Auroville" "Version 3.2.5"
+.TH bung-common 8 "3 Aug 2022" "Auroville" "Version 3.2.6"
 .SH NAME
 bung \- common options for most bung scripts
 .SH SYNOPSIS
@@ -50,7 +50,7 @@ Configuration file name.
 If it does not start with /
 it is relative to the bung configuration directory,
 /etc/bung for root or ~/etc/bung for others
-unless overriden by the BUNG_ETC_DIR environment variable.
+unless overridden by the BUNG_ETC_DIR environment variable.
 .RE
 .
 .TP
@@ -81,7 +81,7 @@ Print help and exit.
 Log directory.
 .br
 Default /var/log/bung for root or ~/var/log/bung for others
-unless overriden by the BUNG_LOG_DIR environment variable.
+unless overridden by the BUNG_LOG_DIR environment variable.
 .RE
 .
 .TP
@@ -131,7 +131,7 @@ In subsidiary mode, the script does not finalise the log or send a report email.
 Temporary directory root
 .br
 Default /run/bung for root or ~/run/bung for others
-unless overriden by the BUNG_TMP_DIR environment variable.
+unless overridden by the BUNG_TMP_DIR environment variable.
 .br
 The PID file is created in this directory too.
 .RE

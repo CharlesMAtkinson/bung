@@ -1,3 +1,7 @@
 #!/bin/bash
-# Remove bung logs more than four months old
-[[ -d /var/log/bung ]] && find /var/log/bung/ -maxdepth 1 -name '*.log' -mtime +122 -execdir rm {} \+
+
+# Do nothing if systemd is in use
+[[ -d /run/systemd/system ]] && exit 0
+
+# Remove /var/log/bung/* files more than 122 days (~4 months) old
+[[ -d /var/log/bung ]] && find /var/log/bung/ -maxdepth 1 -name '*.log' -mtime +122 -execdir rm {} +

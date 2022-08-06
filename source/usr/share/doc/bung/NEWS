@@ -1,4 +1,12 @@
 --------------------------------------------------------------------------------
+Version 3.2.6  3 Aug 2022
+
+* Bug  #13957 do_umounts function: inconsistent "was not mounted" and "Unmounted" messages
+* Bug  #14080 bung/tools/set_perms.sh: does not set source/etc/cron.weekly/bung executable
+* Task #14357 /etc/cron.weekly/bung: add systemd .timer equivalent
+* Bug  #14363 finalise.fun: log: no "Exiting with return value" message
+
+--------------------------------------------------------------------------------
 Version 3.2.5  13 Apr 2022
 
 * mysql_bu and sysinfo_bu: update for Bullseye
