@@ -1,4 +1,12 @@
 --------------------------------------------------------------------------------
+Version 3.2.7  11 Nov 2022
+
+* Bug #14591 initialise_1.scrippet: echo: write error: Broken pipe
+* Bug #14612 rsync_bu 5 man page --bwlimit: default wrong
+* Minor command path fix (no issue)
+* Minor typo (in message. No issue)
+
+--------------------------------------------------------------------------------
 Version 3.2.6  3 Aug 2022
 
 * Bug  #13957 do_umounts function: inconsistent "was not mounted" and "Unmounted" messages

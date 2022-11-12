@@ -24,7 +24,7 @@
         echo 'ERROR: locale --all-locales did not list any English UTF8 locales' >&2
         exit 1
     fi
-    export LANG=$(echo "$buf" | head -1)
+    export LANG=${buf%%$'\n'*}
     export LANGUAGE=$LANG
     for var_name in LC_ADDRESS LC_ALL LC_COLLATE LC_CTYPE LC_IDENTIFICATION \
         LC_MEASUREMENT LC_MESSAGES LC_MONETARY LC_NAME LC_NUMERIC LC_PAPER \

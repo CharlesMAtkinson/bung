@@ -652,7 +652,7 @@ function remove_old_backups {
     # Remote or local?
     # ~~~~~~~~~~~~~~~
     if [[ $dest_dir_remote_flag ]]; then
-        msg I "Removing old and empty directories under '$rsync_backup_dir}'"
+        msg I "Removing old and empty directories under '$rsync_backup_dir'"
         #   Syntax
         #       run_remote_agent -b|-D -c conf [-l dir] [-p dir] -s ssh_host [-t timeouts] [-T count]
         #   Where

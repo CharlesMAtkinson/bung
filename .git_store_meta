@@ -14,7 +14,7 @@ source/usr/bin/mysql_bu	f	2022-04-13T09:54:15Z
 source/usr/bin/openldap_bu	f	2022-03-07T08:33:27Z
 source/usr/bin/postgres_bu	f	2022-03-07T08:33:27Z
 source/usr/bin/remote_agent	f	2022-02-04T04:56:05Z
-source/usr/bin/rsync_bu	f	2022-03-05T11:49:08Z
+source/usr/bin/rsync_bu	f	2022-11-01T04:31:24Z
 source/usr/bin/rsync_restore	f	2022-03-07T08:33:27Z
 source/usr/bin/super_bu	f	2022-03-07T08:33:27Z
 source/usr/bin/sysinfo_bu	f	2022-04-13T14:06:14Z
@@ -45,7 +45,7 @@ source/usr/lib/bung/err_trap_uint.fun	f	2020-11-24T03:07:14Z
 source/usr/lib/bung/fct.fun	f	2020-11-24T03:07:14Z
 source/usr/lib/bung/finalise.fun	f	2022-08-03T09:11:25Z
 source/usr/lib/bung/get_fs_type.fun	f	2020-11-24T03:07:14Z
-source/usr/lib/bung/initialise_1.scrippet	f	2022-03-28T09:46:24Z
+source/usr/lib/bung/initialise_1.scrippet	f	2022-11-11T03:10:27Z
 source/usr/lib/bung/is_fs_mounted.fun	f	2020-11-24T03:07:14Z
 source/usr/lib/bung/msg.fun	f	2020-11-24T03:07:14Z
 source/usr/lib/bung/msg_on_screen.fun	f	2018-05-30T10:32:09Z
@@ -70,14 +70,14 @@ source/usr/lib/bung/run_remote_agent.fun	f	2022-03-05T11:46:02Z
 source/usr/lib/bung/run_subsidiary_scripts.fun	f	2022-03-28T07:19:06Z
 source/usr/lib/bung/set_traps.fun	f	2021-09-07T08:28:44Z
 source/usr/lib/bung/usage.fun	f	2021-03-20T01:34:20Z
-source/usr/lib/bung/version.scrippet	f	2022-08-03T09:24:58Z
+source/usr/lib/bung/version.scrippet	f	2022-11-11T03:34:17Z
 source/usr/share/doc/bung/AUTHORS	f	2021-09-08T06:18:40Z
 source/usr/share/doc/bung/BUGS	f	2022-03-17T02:03:02Z
 source/usr/share/doc/bung/Backup scripts next generation 3.2.x Programmer's Guide.odt	f	2022-03-17T02:22:09Z
 source/usr/share/doc/bung/Backup scripts next generation 3.2.x User Guide.odt	f	2022-08-03T08:24:54Z
-source/usr/share/doc/bung/Backup scripts next generation Publisher's Guide.odt	f	2022-04-06T00:51:16Z
+source/usr/share/doc/bung/Backup scripts next generation Publisher's Guide.odt	f	2022-08-31T04:23:15Z
 source/usr/share/doc/bung/COPYING	f	2018-10-08T13:36:44Z
-source/usr/share/doc/bung/NEWS	f	2022-08-03T09:28:10Z
+source/usr/share/doc/bung/NEWS	f	2022-11-11T03:41:44Z
 source/usr/share/doc/bung/README	f	2022-01-30T06:20:59Z
 source/usr/share/doc/bung/examples/cron/cron.daily	f	2021-03-20T01:52:25Z
 source/usr/share/doc/bung/examples/hook scripts/bung_post_hook_for_routers_and_switches.sh	f	2021-04-08T09:35:46Z
@@ -116,32 +116,32 @@ source/usr/share/doc/bung/examples/templated_bu/sg350.telnet.expect	f	2022-03-07
 source/usr/share/doc/bung/examples/templated_bu/switch.ssh.template	f	2021-02-11T06:08:07Z
 source/usr/share/doc/bung/examples/templated_bu/switch.telnet.template	f	2021-02-11T06:08:23Z
 source/usr/share/doc/bung/examples/templated_bu/switch.template.helper.sh	f	2022-03-07T08:33:27Z
-source/usr/share/man/man5/bung-common.5	f	2022-08-03T09:30:49Z
-source/usr/share/man/man5/check_hotplug_usage.5	f	2022-08-03T09:30:49Z
-source/usr/share/man/man5/hotplug_bu.5	f	2022-08-03T09:30:49Z
-source/usr/share/man/man5/hotplug_bu_launcher.5	f	2022-08-03T09:30:49Z
-source/usr/share/man/man5/mysql_bu.5	f	2022-08-03T09:30:49Z
-source/usr/share/man/man5/openldap_bu.5	f	2022-08-03T09:30:49Z
-source/usr/share/man/man5/postgres_bu.5	f	2022-08-03T09:30:49Z
-source/usr/share/man/man5/rsync_bu.5	f	2022-08-03T09:30:49Z
-source/usr/share/man/man5/super_bu.5	f	2022-08-03T09:30:49Z
-source/usr/share/man/man5/sysinfo_bu.5	f	2022-08-03T09:30:49Z
-source/usr/share/man/man5/template_file.5	f	2022-08-03T09:30:49Z
-source/usr/share/man/man5/templated_bu.5	f	2022-08-03T09:30:49Z
-source/usr/share/man/man8/bung-common.8	f	2022-08-03T09:30:49Z
-source/usr/share/man/man8/check_hotplug_usage.8	f	2022-08-03T09:30:49Z
-source/usr/share/man/man8/hotplug_bu.8	f	2022-08-03T09:30:49Z
-source/usr/share/man/man8/hotplug_bu_launcher.8	f	2022-08-03T09:30:49Z
-source/usr/share/man/man8/mysql_bu.8	f	2022-08-03T09:30:49Z
-source/usr/share/man/man8/openldap_bu.8	f	2022-08-03T09:30:49Z
-source/usr/share/man/man8/postgres_bu.8	f	2022-08-03T09:30:49Z
-source/usr/share/man/man8/remote_agent.8	f	2022-08-03T09:30:49Z
-source/usr/share/man/man8/rsync_bu.8	f	2022-08-03T09:30:49Z
-source/usr/share/man/man8/rsync_restore.8	f	2022-08-03T09:30:49Z
-source/usr/share/man/man8/super_bu.8	f	2022-08-03T09:30:49Z
-source/usr/share/man/man8/sysinfo_bu.8	f	2022-08-03T09:30:49Z
-source/usr/share/man/man8/templated_bu.8	f	2022-08-03T09:30:49Z
-source/usr/share/man/man8/validate_ssh_cmd.8	f	2022-08-03T09:30:49Z
+source/usr/share/man/man5/bung-common.5	f	2022-11-11T03:42:59Z
+source/usr/share/man/man5/check_hotplug_usage.5	f	2022-11-11T03:42:59Z
+source/usr/share/man/man5/hotplug_bu.5	f	2022-11-11T03:42:59Z
+source/usr/share/man/man5/hotplug_bu_launcher.5	f	2022-11-11T03:42:59Z
+source/usr/share/man/man5/mysql_bu.5	f	2022-11-11T03:42:59Z
+source/usr/share/man/man5/openldap_bu.5	f	2022-11-11T03:42:59Z
+source/usr/share/man/man5/postgres_bu.5	f	2022-11-11T03:42:59Z
+source/usr/share/man/man5/rsync_bu.5	f	2022-11-11T03:42:59Z
+source/usr/share/man/man5/super_bu.5	f	2022-11-11T03:42:59Z
+source/usr/share/man/man5/sysinfo_bu.5	f	2022-11-11T03:42:59Z
+source/usr/share/man/man5/template_file.5	f	2022-11-11T03:42:59Z
+source/usr/share/man/man5/templated_bu.5	f	2022-11-11T03:42:59Z
+source/usr/share/man/man8/bung-common.8	f	2022-11-11T03:42:59Z
+source/usr/share/man/man8/check_hotplug_usage.8	f	2022-11-11T03:42:59Z
+source/usr/share/man/man8/hotplug_bu.8	f	2022-11-11T03:42:59Z
+source/usr/share/man/man8/hotplug_bu_launcher.8	f	2022-11-11T03:42:59Z
+source/usr/share/man/man8/mysql_bu.8	f	2022-11-11T03:42:59Z
+source/usr/share/man/man8/openldap_bu.8	f	2022-11-11T03:42:59Z
+source/usr/share/man/man8/postgres_bu.8	f	2022-11-11T03:42:59Z
+source/usr/share/man/man8/remote_agent.8	f	2022-11-11T03:42:59Z
+source/usr/share/man/man8/rsync_bu.8	f	2022-11-11T03:42:59Z
+source/usr/share/man/man8/rsync_restore.8	f	2022-11-11T03:42:59Z
+source/usr/share/man/man8/super_bu.8	f	2022-11-11T03:42:59Z
+source/usr/share/man/man8/sysinfo_bu.8	f	2022-11-11T03:42:59Z
+source/usr/share/man/man8/templated_bu.8	f	2022-11-11T03:42:59Z
+source/usr/share/man/man8/validate_ssh_cmd.8	f	2022-11-11T03:42:59Z
 tools/README.txt	f	2022-03-14T02:43:35Z
 tools/create_tarballs.sh	f	2022-03-30T08:49:22Z
 tools/git-store-meta/LICENSE	f	2022-02-28T06:13:48Z
