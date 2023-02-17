@@ -1,5 +1,5 @@
 .ig
-Copyright (C) 2021 Charles Atkinson
+Copyright (C) 2023 Charles Michael Atkinson
 
 Permission is granted to make and distribute verbatim copies of this
 manual provided the copyright notice and this permission notice are
@@ -19,7 +19,7 @@ the original English.
 .\" No adjustment (ragged right)
 .na\" No adjusting text
 .nh\" No hyphenation
-.TH template_file 5 "11 Nov 2022" "Auroville" "Version 3.2.7"
+.TH template_file 5 "10 Feb 2023" "Auroville" "Version 3.5.0"
 .SH NAME
 bung \- templated_bu template file format
 .SH SYNOPSIS
@@ -204,12 +204,16 @@ No quoting or escaping is supported.
 .RE
 .SH OPTIONS (tokens)
 .P
-Token values are defined in templated_bu's configuration file 
-except for tmp_dir (defined internally by templated_bu)
-and any variables defined by assignments in the template file.
+Token values are defined
+.IP \(bu 4
+In templated_bu's configuration file (hostname, identity_file, password ...)
+.IP \(bu 4
+By variable assignments in the template file as explained in \fB<variable name>\fR above
+.IP \(bu 4
+By templated_bu (only tmp_dir)
 .P
 Tokens are identified in the template file by %-quoted names,
-for example %tmp_dir%.
+for example %hostname%.
 .P
 The tokens are:
 .RS
@@ -271,6 +275,11 @@ Can be used to name a TFTP server and directory.
 .P
 A temporary directory created by templated_bu
 and removed when templated_bu finalises.
+.br
+The templated backup must not write to 
+directory mnt or files rc and out
+in the temporary directory.
+They are used by templated_bu.
 .P
 .RE
 .RS
@@ -287,7 +296,7 @@ Any git_root must have been set up as a working git repository
 along with any ~/.ssh/config host stanza required for it to work.
 .SH EXAMPLES
 Example bung configuration files are
-normally installed in /usr/share/bung/doc/examples
+normally installed in /usr/share/doc/bung/examples
 .P
 templated_bu configuration file (the templated line is a single line):
 .RS
@@ -371,9 +380,9 @@ OK rc list: ==0
 .br
 
 .SH AUTHOR
-Charles Atkinson bung@charlesmatkinson.org
+Charles Michael Atkinson bung@charlesmatkinson.org
 .SH SEE ALSO
 \fBtemplated_bu\fR(5 and 8)
 .br
 The bung user guide,
-normally installed in /usr/share/bung/doc/
+normally installed in /usr/share/doc/bung/

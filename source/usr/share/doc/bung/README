@@ -9,9 +9,9 @@ mounted when the backup starts and unmounted when it ends.  This minimises the
 danger of accidentally removing backup files.
 
 The rsync-based files backup creates a "rolling full" backup which is easy to 
-browse and restore from using everyday tools. Changed and deleted files are kept 
-for a configurable number of days. When the source is on an LVM volume, 
-snapshots can be used.
+browse and restore from using everyday tools.  Changed and deleted files are
+retained for a configurable number of days, backups or file system usage %.
+When the source is on an LVM volume, snapshots can be used.
 
 Backup jobs are scheduled or initiated by plugging in hotplug storage such as 
 USB disks. When hotplug storage starts a backup, on-screen notifications 
@@ -24,6 +24,6 @@ are run.
 Developed in a production environment, bung's log messages are designed to give 
 the information needed to investigate problems.
 
-Backup reports are sent by email.
+Backup reports are optionally sent by email or by notification plug-ins. 
 
 bung is written in bash and uses the GPL-2.0+ license.

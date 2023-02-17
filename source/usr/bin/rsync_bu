@@ -1,6 +1,6 @@
 #! /bin/bash
 
-# Copyright (C) 2022 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -78,13 +78,15 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 #    |
 #    +-- backup
 #    |   |
-#    |   +-- ck_backup
-#    |   |
 #    |   +-- remove_old_backups
+#    |   |
+#    |   +-- ck_backup
 #    |   |
 #    |   +-- report_dest_dir_usage
 #    |
 #    +-- finalise
+#        |
+#        +-- functions as documented in finalise.fun
 #
 # Utility functions called from various places:
 #     ck_file ck_uint do_umounts err_trap_uint fct msg parse_conf_subkey_value
@@ -110,10 +112,13 @@ function backup {
     local dest_dir_escaped dest_dir_remote_host
     local src_dir_remote_host
     local remote_conf_fn remote_host run_remote_agent_args
-    local -r tmp_fn=$tmp_dir/backup
-    local -r usage_percent_regex='^[[:digit:]]+%$'
-    local -r no_such_regex='No such file or directory'
     local -r bad_configuration_option_re='Bad configuration option'
+    local -r directory_exists_re='Directory .* exists'
+    local -r no_such_regex='No such file or directory'
+    local -r retention_days_re='[[:digit:]](days)?(,nowarn)?$'
+    local -r retention_0_days_re='^0(days)?(,nowarn)?$'
+    local -r tmp_fn=$tmp_dir/backup
+    local -r use_percent_re='^[[:digit:]]+%$'
 
     # Initialise convenience variables
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -144,8 +149,7 @@ function backup {
 
         # Is retention required?
         # ~~~~~~~~~~~~~~~~~~~~~~
-        ((backup_retention!=0)) \
-            && retention_flag=$true || retention_flag=$false
+        [[ $retention =~ $retention_0_days_re ]] && retention_flag=$false || retention_flag=$true
 
         # Does the rsync --backup directory exist?
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -170,7 +174,7 @@ function backup {
             #          s for seconds (the default)
             #          m for minutes
             #          h for hours
-            #          d for days  
+            #          d for days
             #          Default 10,10
             #       -T timeout retry count.  Default 0
             backup_dir_absolute=$dest_dir_remote_dir/$rsync_backup_dir
@@ -188,7 +192,7 @@ function backup {
             run_remote_agent "${run_remote_agent_args[@]}"
             rc=$?
             ((rc!=0)) && msg E 'rsync --backup directory status not found'
-            [[ $(<"$tmp_dir"/out) = Exists ]] && backup_dir_exists_flag=$true
+            [[ $(<"$tmp_dir"/out) =~ $directory_exists_re ]] && backup_dir_exists_flag=$true
         else
             backup_dir_absolute=$dest_dir/$rsync_backup_dir
             [[ -d "$backup_dir_absolute" ]] && backup_dir_exists_flag=$true
@@ -214,7 +218,7 @@ function backup {
         else
            if [[ $backup_dir_exists_flag ]]; then
                # A backup directory exists on the destination directory
-               if [[ ! $backup_retention_0_nowarn_flag ]]; then
+               if [[ ! $retention_0_nowarn_flag ]]; then
                    buf=$rsync_backup_dir
                    msg W "Directory '$buf' exists but 'retention=0' is configured.  It will not be removed"
                    rsync_cmd+=("--exclude=/$rsync_backup_dir/")
@@ -284,6 +288,10 @@ function backup {
         )
     fi
 
+    # Remove old changed and deleted files
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    remove_old_backups
+
     # Run the rsync command
     # ~~~~~~~~~~~~~~~~~~~~~
     for buf in "${rsync_cmd[@]}"
@@ -305,8 +313,6 @@ function backup {
         [[ ! $try_rsync_again_flag ]] && break
     done
     [[ ! $rsync_cmd_ran_OK_flag ]] && msg E 'rsync did not run OK (detail above)'
-
-    remove_old_backups
     report_dest_dir_usage
 
     fct "${FUNCNAME[0]}" 'returning'
@@ -459,8 +465,10 @@ source "$BUNG_LIB_DIR/do_snapshots.fun" || exit 1
 source "$BUNG_LIB_DIR/do_umounts.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_email_for_report.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_mount_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_notification_plug_in_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_post_hook_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_pre_hook_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_retention_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_rsync_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_rsync_files_and_dirs.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_shutdown.fun" || exit 1
@@ -495,14 +503,14 @@ function initialise {
 
     # Parse configuration file
     # ~~~~~~~~~~~~~~~~~~~~~~~~
-    emsg=
     # Note: ensure a space on both sides of each string in the arrays
     local -A keyword_validation
-    keyword_validation[name]=' 
+    keyword_validation[name]='
         emailforreport 
         logretention 
         maxmemorysize 
         mount 
+        notificationplug_in 
         numberofopenfiles 
         organisationname 
         post_hook 
@@ -511,7 +519,7 @@ function initialise {
         shutdown 
         snapshot 
     '
-    keyword_validation[repeat invalid]=' 
+    keyword_validation[repeat_invalid]=' 
         logretention 
         maxmemorysize 
         numberofopenfiles 
@@ -547,6 +555,9 @@ function initialise {
     # Mount
     postprocess_mount_conf && err_trap_mount_conf
 
+    # Notification plug-in
+    err_trap_notification_plug_in_conf
+
     # Organisation name
     postprocess_org_name_conf "${org_name:-}" "${org_name_optarg:-}" "$opt_o_flag"
 
@@ -566,6 +577,7 @@ function initialise {
     # Snapshot
     postprocess_snapshot_conf && err_trap_snapshot_conf
 
+    [[ $wmsg != '' ]] && msg W "Error(s) in configuration file $conf_fn:$wmsg"
     [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
 
     # Finish if -C option (check the configuration)
@@ -590,7 +602,7 @@ function initialise {
 }  # end of function initialise
 
 source "$BUNG_LIB_DIR/msg.fun" || exit 1
-source "$BUNG_LIB_DIR/my_cat.fun" || exit 1
+source "$BUNG_LIB_DIR/my_mailx.fun" || exit 1
 source "$BUNG_LIB_DIR/parse_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/parse_conf_rsync.fun" || exit 1
 source "$BUNG_LIB_DIR/parse_conf_word.fun" || exit 1
@@ -602,15 +614,17 @@ source "$BUNG_LIB_DIR/postprocess_snapshot_conf.fun" || exit 1
 
 #--------------------------
 # Name: remove_old_backups
-# Purpose: checked the output from the rsync command; decides if it was OK
+# Purpose:
+#    * Removes old backup trees by default created as $dest_dir/_Changed and deleted files/<yyyy>/Mmm>/<dd>@<hh>:<mm>
+#        * "_Changed and deleted files" can be changed using the --backup-dir sub-keyword
+#        * Removal follows the policy set by the retention sub-keyword
 # Arguments: none
 # Global variable usage:
 #   backup_dir_absolute: read
-#   backup_retention: read
+#   retention: read
 #   backup_subdir_regex: read
 #   dest_dir_remote_flag: read
 #   dest_dir_remote_host: read
-#   i (function backup's rsync_idx loop variable): read
 #   rsync_backup_dir: read
 #   rsync_cmd_ran_OK_flag: set
 #   rsync_out: read
@@ -619,11 +633,13 @@ source "$BUNG_LIB_DIR/postprocess_snapshot_conf.fun" || exit 1
 #--------------------------
 function remove_old_backups {
     fct "${FUNCNAME[0]}" 'started'
-    local buf j
-    local find_old_cmd find_empty_cmd
-    local msg_part OK_to_continue old_PWD out
+    local array buf cmd candidate_dirs dir i retention_days
+    local msg_part n_dirs_to_keep OK_to_continue old_PWD out
     local remote_out remote_conf_fn run_remote_agent_args
+    local target_percent
     local -r tmp_fn=$tmp_dir/${FUNCNAME[0]}
+    local -r retention_percent_usage_re='percent_usage(,[[:digit:]]+min_old_backups)?$'
+    local -r retention_old_backups_re='old_backups$'
 
     # Nothing to do?
     # ~~~~~~~~~~~~~~
@@ -634,7 +650,7 @@ function remove_old_backups {
             fct "${FUNCNAME[0]}" 'returning 0'
             return 0
         fi
-        if ((backup_retention==0)); then
+        if [[ ! $retention_flag ]]; then
             msg_part='retention 0 configured'
             msg I "$msg_part; no old backups to remove"
             fct "${FUNCNAME[0]}" 'returning 0'
@@ -647,12 +663,9 @@ function remove_old_backups {
         return 0
     fi
 
-    msg I 'Removing backups older than the retention time'
-
     # Remote or local?
     # ~~~~~~~~~~~~~~~
     if [[ $dest_dir_remote_flag ]]; then
-        msg I "Removing old and empty directories under '$rsync_backup_dir'"
         #   Syntax
         #       run_remote_agent -b|-D -c conf [-l dir] [-p dir] -s ssh_host [-t timeouts] [-T count]
         #   Where
@@ -669,12 +682,12 @@ function remove_old_backups {
         #          s for seconds (the default)
         #          m for minutes
         #          h for hours
-        #          d for days  
+        #          d for days
         #          Default 10,10
         #       -T timeout retry count.  Default 0
         backup_dir_absolute=$dest_dir_remote_dir/$rsync_backup_dir
         run_remote_agent_args=(
-            -c "$backup_dir_absolute" -b "$backup_retention" 
+            -c "$backup_dir_absolute" -b "$retention"
         )
         [[ $remote_host_log_dir != '' ]] \
             && run_remote_agent_args+=(-l "$remote_host_log_dir")
@@ -690,8 +703,8 @@ function remove_old_backups {
         out=$(<"$out_fn")
         case $rc in
             0)
-                [[ $out != '' ]] \
-                    && msg W "Unexpected output from remote agent: $out"
+                msg I '==== output from remote_agent begins ===='$'\n'"$out"
+                msg I '==== output from remote_agent ends ===='
                 ;;
             1)
                 msg W "Remote agent failed. rc: $rc, output: $out"
@@ -700,46 +713,106 @@ function remove_old_backups {
                 msg W "Timed out running remote agent"
         esac
     else
-        msg I "Removing old directories under '$rsync_backup_dir'"
         # The backup directory's parent path may not match itself when
         # used as a regex; avoid the problem by cd to the backup directory
         old_PWD=$PWD
         cd "$backup_dir_absolute" || msg E "Unable to cd to '$backup_dir_absolute'"
 
-        # Build and run the find command for old directories
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        find_old_cmd=(
-            find
-            .
-            -maxdepth 3
-            -regextype posix-egrep
-            -mtime +$((backup_retention-1))
-            -regex "$backup_subdir_regex"
-            -type d
-            -exec rm -fr {} ';'
-        )
-        msg D "${FUNCNAME[0]}: find_old_cmd: ${find_old_cmd[*]}"
-        buf=$("${find_old_cmd[@]}" 2>&1)
-        if [[ $buf = '' ]]; then
-            msg I "Removing empty directories under '$rsync_backup_dir'"
-
-            # Build and run the find command for empty directories
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            find_empty_cmd=(
+        # Remove old directories
+        # ~~~~~~~~~~~~~~~~~~~~~~
+        msg I "Removing old directories under '$rsync_backup_dir' for retention $retention"
+        if [[ $retention =~ $retention_percent_usage_re || $retention =~ $retention_old_backups_re ]]; then
+           candidate_dirs=($(find -maxdepth 3 -mindepth 3 -type d -printf "%T+\t%p\n" | sort | sed 's/.*\././'))
+        fi
+        if [[ $retention =~ $retention_percent_usage_re ]]; then
+            # Syntax: <number>percent_usage[,<number>min_old_backups]
+            buf=${retention%min_old_backups}
+            if [[ $buf = $retention ]]; then
+                n_dirs_to_keep=0
+            else
+                n_dirs_to_keep=${buf#*,}
+            fi
+            buf=${retention%,*}
+            target_percent=${buf%percent_usage}
+            usage=
+            for ((i=0;i<${#candidate_dirs[*]}-n_dirs_to_keep;i++))
+            do
+                buf=$(df . 2>&1)
+                case $buf in
+                    Filesystem* )
+                        ;;
+                    * )
+                        msg E "Unexpected output checking destination directory file system usage: $buf"
+                        ;;
+                esac
+                array=($buf)
+                if [[ ${array[11]} =~ $use_percent_re ]]; then
+                    usage=${array[11]//%}
+                    msg I "Usage is $usage%"
+                    ((usage<=target_percent)) && break
+                else
+                    msg E "Unexpected output from$msg_part df $dest_dir: $buf"
+                fi
+                dir="${candidate_dirs[i]}"
+                msg I "Removing $dir"
+                cmd=(rm -r "${candidate_dirs[i]}")
+                buf=$("${cmd[@]}" 2>&1)
+                if [[ $buf != '' ]]; then
+                    msg_part='Unexpected output from find while'
+                    msg_part+=' removing old directories under'
+                    msg W "$msg_part '$backup_dir_absolute': $buf"
+                fi
+            done
+            if [[ $usage != '' ]]; then
+                ((usage>target_percent)) && msg I "Stopped removing old directories to keep $n_dirs_to_keep"
+            else
+                msg_part="No old directories removed because there were only"
+                msg I "$msg_part ${#candidate_dirs[*]} old directories (<= $n_dirs_to_keep)"
+            fi
+        elif [[ $retention =~ $retention_old_backups_re ]]; then
+            n_dirs_to_keep=${retention%old_backups}
+            msg I "Currently ${#candidate_dirs[*]} directories"
+            for ((i=0;i<${#candidate_dirs[*]}-n_dirs_to_keep;i++))
+            do
+                dir=${candidate_dirs[i]}
+                msg I "Removing $dir"
+                cmd=(rm -r "$dir")
+                buf=$("${cmd[@]}" 2>&1)
+                if [[ $buf != '' ]]; then
+                    msg_part='Unexpected output from find while'
+                    msg_part+=' removing old directories under'
+                    msg W "$msg_part '$backup_dir_absolute': $buf"
+                fi
+            done
+        else
+            cmd=(
                 find
                 .
-                -depth -mindepth 1 -type d -empty -delete
+                -maxdepth 3
+                -regextype posix-egrep
+                -mtime +$((${retention%days}-1))
+                -regex "$backup_subdir_regex"
+                -type d
+                -exec rm -fr {} ';'
             )
-            msg D "${FUNCNAME[0]}: find_empty_cmd: ${find_empty_cmd[*]}"
-            buf=$("${find_empty_cmd[@]}" 2>&1)
+            msg D "${FUNCNAME[0]}: cmd: ${cmd[*]}"
+            buf=$("${cmd[@]}" 2>&1)
             if [[ $buf != '' ]]; then
                 msg_part='Unexpected output from find while'
-                msg_part+=' removing empty directories under'
+                msg_part+=' removing old directories under'
                 msg W "$msg_part '$backup_dir_absolute': $buf"
             fi
-        else
+        fi
+
+        # Remove empty directories (<yyyy>/Mmm and <yyyy>)
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        msg I "Removing empty directories under '$rsync_backup_dir'"
+        cmd=(find -depth -mindepth 1 -type d -empty -delete)
+        msg D "${FUNCNAME[0]}: cmd: ${cmd[*]}"
+        buf=$("${find_empty_cmd[@]}" 2>&1)
+        if [[ $buf != '' ]]; then
             msg_part='Unexpected output from find while'
-            msg_part+=' removing old directories under'
+            msg_part+=' removing empty directories under'
             msg W "$msg_part '$backup_dir_absolute': $buf"
         fi
         cd "$old_PWD" || msg E "Unable to cd to '$old_PWD'"
@@ -751,6 +824,7 @@ function remove_old_backups {
 source "$BUNG_LIB_DIR/report_dest_dir_usage.fun" || exit 1
 source "$BUNG_LIB_DIR/run_cmd_with_timeout.fun" || exit 1
 source "$BUNG_LIB_DIR/run_pre_hooks.fun" || exit 1
+source "$BUNG_LIB_DIR/run_notification_plug_in.fun" || exit 1
 source "$BUNG_LIB_DIR/run_remote_agent.fun" || exit 1
 source "$BUNG_LIB_DIR/usage.fun" || exit 1
 

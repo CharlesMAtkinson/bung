@@ -1,0 +1,15 @@
+---
+
+bung_rsync_server_fqdn: backup-rsync.iciti.av
+bung_etc_cron_daily_content: |
+  #!/bin/bash
+  
+  buf=$(
+      echo /usr/bin/super_bu -c all \
+          | at now +10 minutes 2>&1 \
+          | grep -v '^warning: commands will be executed using /bin/sh' \
+          | grep -Ev '^job [[:digit:]]+ at '
+  )
+  [[ $buf != '' ]] && echo "$buf"
+  exit 0    # Required because the $buf test above normally fails
+

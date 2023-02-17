@@ -1,4 +1,4 @@
-# Copyright (C) 2021 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,6 +13,21 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+
+# Programmers' notes: function call tree
+#    +
+#    |
+#    +-- do_mounts
+#    |
+#    +-- do_umounts
+#    |
+#    +-- spin_down_device
+#    |
+#    +-- msg_on_screen
+#    |
+#    +-- notify_finally
+#
+# Utility functions called from various places: run_cmd_with_timeout
 
 #--------------------------
 # Name: finalise
@@ -30,19 +45,26 @@
 function finalise {
     fct "${FUNCNAME[0]}" "started with args $*"
     [[ ${BUNG_COMPGEN_DIR:-} != '' ]] && compgen -v >> $BUNG_COMPGEN_DIR/final.vars
-    local address at_least_one_lvremove_failed_flag body buf hdun_body hdun_subject i j
-    local logger_msg lsof_out lvremove_failed_flag lvremove_rc mountpoint
-    local msg msg_class msg_level my_exit_code my_snapshot_mapper my_snapshot_vol subject
-    local tmp_dir_regex umounted_flag
+    local buf cmd rc
+    local body body_preamble i j logger_msg logger_msg_part msg msg_class msg_level my_exit_code subject
+    local interrupt_flag sig_name                                         # Interrupts
+    local out                                                             # Post-hooks
+    local at_least_one_lvremove_failed_flag lsof_out lvremove_failed_flag # Snapshots
+    local lvremove_rc  my_snapshot_mapper my_snapshot_vol                 # Snapshots
+    local address mail_sent_flag                                          # Emails
+    local conf_fn conffile notification_sent_flag                         # Notifications 
     local -r shutdown_cmd='shutdown -h +5'
     local -r subject_postfix=' (bung)'
     local -r usage_percent_regex='^[[:digit:]]+%$'
+    local -r tmp_dir_regex="^$tmp_dir_root/$script_name\+$conf_name\..{6}$"
+    local -r tmp_dir_pg_regex="^$tmp_dir_root/$script_name\+$conf_name\.pg\..{6}$"
 
     finalising_flag=$true
     
     # Interrupted?
     # ~~~~~~~~~~~~
     my_exit_code=0
+    interrupt_flag=$false
     if ck_uint "${1:-}"; then
         if (($1>128)); then    # Trapped interrupt
             interrupt_flag=$true
@@ -114,7 +136,7 @@ function finalise {
 
     # Hotplug device final notification
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    if [[ ${hotplug_dev_idx:-} != '' ]]; then
+    if [[ ${hotplugdevice_keyword_found_flag:-} = $true ]]; then
         notify_finally
     fi
 
@@ -247,23 +269,23 @@ function finalise {
     else
         msg I "There was a $sig_name interrupt" 
     fi
-    msg I "Exiting with return value $my_exit_code"
 
-    # Final messages (logger and email)
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Final messages
+    # ~~~~~~~~~~~~~~
     if [[ ! $subsidiary_mode_flag ]]; then
 
-        # Non-subsidiary mode: syslog and report mail
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # Non-subsidiary mode: email, notification plug-in and syslog
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         if [[ $logging_flag ]]; then
             # If we are finalising because of an error parsing the config file
             # email_for_report may not have been set in which case set sane
             # defaults
             if ((email_for_report_idx==-1)); then
+                msg D 'Setting "Email for report" sane defaults (because conffile parsing failed)'
                 email_for_report_idx=0
                 email_for_report[0]=root
                 email_for_report_msg_level[0]=I
-                email_for_report_nolog_flag[0]=$false
+                email_for_report_no_log_flag[0]=$false
             fi
 
             # The email subject, ending with SUCCESS, WARN or ERROR followed by
@@ -281,50 +303,111 @@ function finalise {
                         msg_level=${email_for_report_msg_level[i]}
                         [[ $msg_level != I ]] && continue
                         address=${email_for_report[i]}
-                        msg I "Sending report mail to $address"
-                        buf=$(echo "No problems detected.  Log file: $log_fn" \
-                            | mailx -s "$subject" "$address")
-                        [[ $buf != '' ]] && msg W "sending mail: $buf"
+                        mail_sent_flag=$false
+                        my_mailx -a "$address" -b "No problems detected.  Log file: $log_fn" -s "$subject"
+                        if [[ $mail_sent_flag ]]; then
+                            logger_msg='no problems detected, success report'
+                            logger_msg+=" mailed to $address"
+                            buf=$(logger -i -t "$script_name+$conf_name" "$logger_msg" 2>&1)
+                            [[ $buf != '' ]] && msg E "logger command problem: $buf"
+                        fi
                     done
-                    logger_msg='no problems detected, success report'
-                    logger_msg+=" mailed to ${email_for_report[*]}"
+                    for ((i=0;i<=notification_plug_in_idx;i++))
+                    do
+                        [[ ${notification_plug_in_conf_err_flag[i]} ]] && continue
+                        msg_level=${notification_plug_in_msg_level[i]}
+                        [[ $msg_level != I ]] && continue
+                        conffile=${notification_plug_in_conffile[i]}
+                        if [[ ${conffile#*/} = $conffile ]]; then    # conffile does not contain a "/"
+                            conf_fn=$conf_dir/$conffile
+                        else
+                            conf_fn=$conffile
+                        fi 
+                        executable=${notification_plug_in_executable[i]}
+                        cmd=(run_notification_plug_in -b "No problems detected.  Log file: $log_fn" -c "$conf_fn" -e "$executable")
+                        cmd+=(-s "$subject" -u ${notification_plug_in_user[i]})
+                        notification_sent_flag=$false
+                        "${cmd[@]}"
+                        if [[ $notification_sent_flag ]]; then
+                            logger_msg='no problems detected, success report'
+                            logger_msg+=" notified according to $conf_fn"
+                            buf=$(logger -i -t "$script_name+$conf_name" "$logger_msg" 2>&1)
+                            [[ $buf != '' ]] && msg E "logger command problem: $buf"
+                        fi
+                    done
                 else
                     logger_msg='no problems detected'
                 fi
-            else
+            else    # Warning, error or interrupt
                 if [[ $error_flag || $interrupt_flag ]]; then
                     subject="$subject ERROR$subject_postfix"
-                    logger_msg="ERROR detected, log mailed to ${email_for_report[*]}"
+                    logger_msg_part="ERROR detected. "
                 else
                     subject="$subject WARN$subject_postfix"
-                    logger_msg="WARNING issued, log mailed to ${email_for_report[*]}"
+                    logger_msg_part="WARNING issued. "
                 fi
-                body=$(
-                    if [[ ${summary_fn:-} != '' && -s $summary_fn ]]; then
-                        echo '== Warning and error summary'
-                        cat "$summary_fn"
-                        echo $'== End of warning and error summary\n'
-                    fi
-                )
+                body_preamble=
+                if [[ ${summary_fn:-} != '' && -s $summary_fn ]]; then
+                    body_preamble+=$'== Warning and error summary\n'
+                    body_preamble+=$(<"$summary_fn")
+                    body_preamble+=$'\n== End of warning and error summary\n'
+                fi
                 for ((i=0;i<=email_for_report_idx;i++))
                 do
+                    address=${email_for_report[i]}
                     msg_level=${email_for_report_msg_level[i]}
                     [[ $msg_level = E && ! $error_flag && ! $interrupt_flag ]] \
                         && continue
-                    [[ ! ${email_for_report_nolog_flag[i]} && -f "$log_fn" ]] \
-                        && body+=$'\n\n'$(my_cat "$log_fn")
-                    address=${email_for_report[i]}
-                    msg I "Sending report mail to $address"
-                    buf=$(echo "$body" \
-                        | iconv --from-code utf-8 --to-code ascii//translit \
-                        | tr --delete '' \
-                        | fold -w 999 \
-                        | mailx -n -s "$subject" "$address")
-                    [[ $buf != '' ]] && msg W "sending mail: $buf"
+                    cmd=(my_mailx -a "$address")
+                    body=$body_preamble
+                    if [[ ! ${email_for_report_no_log_flag[i]} && -f "$log_fn" ]]; then
+                        body+=$'\n'"Here are the contents of $log_fn except for any lines generated after sending this mail"
+                        cmd+=(-l "$log_fn")
+                    fi
+                    cmd+=(-b "$body" -s "$subject")
+                    mail_sent_flag=$false
+                    "${cmd[@]}"
+                    if [[ $mail_sent_flag ]]; then
+                        logger_msg=$logger_msg_part'problems detected, report'
+                        logger_msg+=" mailed to $address"
+                        buf=$(logger -i -t "$script_name+$conf_name" "$logger_msg" 2>&1)
+                        [[ $buf != '' ]] && msg E "logger command problem: $buf"
+                    fi
+                done
+                for ((i=0;i<=notification_plug_in_idx;i++))
+                do  
+                    [[ ${notification_plug_in_conf_err_flag[i]} ]] && continue
+                    msg_level=${notification_plug_in_msg_level[i]}
+                    [[ $msg_level = E && ! $error_flag && ! $interrupt_flag ]] \
+                        && continue
+                    body=$body_preamble
+                    [[ ! ${notification_plug_in_no_log_flag[i]} ]] \
+                        && body+=$'\n'"Here are the contents of $log_fn except for any lines generated after sending this mail"
+                    conffile=${notification_plug_in_conffile[i]}
+                    if [[ ${conffile#*/} = $conffile ]]; then    # conffile does not contain a "/"
+                        conf_fn=$conf_dir/$conffile
+                    else
+                        conf_fn=$conffile
+                    fi  
+                    executable=${notification_plug_in_executable[i]}
+                    cmd=(run_notification_plug_in
+                        -b "$body"
+                        -c "$conf_fn"
+                        -e "$executable"
+                    )
+                    [[ ! ${notification_plug_in_no_log_flag[i]} ]] \
+                        && cmd+=(-l "$log_fn")
+                    cmd+=(-s "$subject" -u ${notification_plug_in_user[i]})
+                    notification_sent_flag=$false
+                    "${cmd[@]}"
+                    if [[ $notification_sent_flag ]]; then
+                        logger_msg='Problems detected, report'
+                        logger_msg+=" notified according to $conf_fn"
+                        buf=$(logger -i -t "$script_name+$conf_name" "$logger_msg" 2>&1)
+                        [[ $buf != '' ]] && msg E "logger command problem: $buf"
+                    fi  
                 done
             fi
-            buf=$(logger -i -t "$script_name+$conf_name" "$logger_msg" 2>&1)
-            [[ $buf != '' ]] && msg W "logger command problem: $buf"
         fi
     else
         # Subsidiary mode: syslog only
@@ -348,12 +431,10 @@ function finalise {
 
     # Remove temporary directory/ies
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    tmp_dir_regex="^$tmp_dir_root/$script_name\+$conf_name\..{6}$"
     [[ $tmp_dir_created_flag \
         && ${tmp_dir:-} =~ $tmp_dir_regex \
     ]] && rm -fr "$tmp_dir"
 
-    tmp_dir_pg_regex="^$tmp_dir_root/$script_name\+$conf_name\.pg\..{6}$"
     [[ ${tmp_dir_pg_created_flag:-$false} \
         && ${tmp_dir_pg:-} =~ $tmp_dir_pg_regex \
     ]] && rm -fr "$tmp_dir_pg"
@@ -364,6 +445,7 @@ function finalise {
 
     # Exit
     # ~~~~
+    msg I "Exiting with exit code $my_exit_code"
     fct "${FUNCNAME[0]}" 'exiting'
     exit $my_exit_code
 }  # end of function finalise
@@ -374,10 +456,9 @@ function finalise {
 # Arguments: none
 # Global variables:
 #   Read:
-#       hotplug_dev[]
-#       hotplug_dev_idx
-#       hotplug_dev_email[]
-#       hotplug_whole_dev[]
+#       hotplug_dev
+#       hotplug_dev_email
+#       hotplug_whole_dev
 #   Set: 
 # Return code: always 0
 #--------------------------
@@ -409,73 +490,73 @@ function notify_finally {
         fi
     fi
 
-    # For each hotplug device
-    # ~~~~~~~~~~~~~~~~~~~~~~~
-    for ((i=0;i<=hotplug_dev_idx;i++))
-    do  
-        # Nothing to do?
-        # ~~~~~~~~~~~~~~
-        # When finalising because of early errors
-        [[ ${hotplug_whole_dev[i]:-} = '' ]] && continue
-        [[ ${out_fn:-} = '' || ! -e "$out_fn" ]] && continue
-        [[ ${rc_fn:-} = '' || ! -e "$rc_fn" ]] && continue
+    # Nothing to do?
+    # ~~~~~~~~~~~~~~
+    # When finalising because of early errors
+    if [[ ${hotplug_whole_dev:-} = '' ]] \
+        || [[ ${out_fn:-} = '' || ! -e "$out_fn" ]] \
+        || [[ ${rc_fn:-} = '' || ! -e "$rc_fn" ]]
+    then
+        fct "${FUNCNAME[0]}" 'returning (nothing to do)'
+        return
+    fi
 
-        # Any file systems on it still mounted?
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        whole_disk_dev=${hotplug_whole_dev[i]}
-        buf=$(mount 2>&1 | grep "^$whole_disk_dev" 2>&1)
-        if [[ $buf = '' ]]; then
+    # Any file systems on it still mounted?
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    whole_disk_dev=$hotplug_whole_dev
+    buf=$(mount 2>&1 | grep "^$whole_disk_dev" 2>&1)
+    if [[ $buf = '' ]]; then
 
-            # Get the file system usage
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~
-            mount_fs_file[0]=$tmp_dir/mnt
-            mount_idx=0
-            mount_ignore_already_mounted[0]=$false
-            mount_ignore_files_under_fs_file[0]=$false
-            mount_o_option[0]=
-            mount_snapshot_idx=-1
-            cmd=(readlink --canonicalize-existing -- "${hotplug_dev_path[i]}")
-            mount_fs_spec[0]=$("${cmd[@]}" 2>&1)
-            if (($?>0)); then
-                msg E "Problems running ${cmd[*]}: ${mount_fs_spec[0]}"
-            fi
-            mount_fsck[0]=$false
-            do_mounts
-            cmd=(df --output=pcent "${hotplug_dev_path[i]}")
-            run_cmd_with_timeout -w '!=0'
-            if (($?==0)); then
-                pcent=$(tail -1 "$out_fn")
-                pcent=${pcent##* }
-            else
-                pcent=unknown
-            fi
-            do_umounts
-            body="Final file system usage is $pcent"
-
-            spin_down_device "$whole_disk_dev"
-            subject="OK to unplug $org_name hotplug storage"
-            dialog_type=info
+        # Get the file system usage
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~
+        mount_fs_file[0]=$tmp_dir/mnt
+        mount_idx=0
+        mount_ignore_already_mounted[0]=$false
+        mount_ignore_files_under_fs_file[0]=$false
+        mount_o_option[0]=
+        mount_snapshot_idx=-1
+        cmd=(readlink --canonicalize-existing -- "${hotplug_dev_path}")
+        mount_fs_spec[0]=$("${cmd[@]}" 2>&1)
+        if (($?>0)); then
+            msg E "Problems running ${cmd[*]}: ${mount_fs_spec[0]}"
+        fi
+        mount_fsck[0]=$false
+        do_mounts
+        cmd=(df --output=pcent "${hotplug_dev_path}")
+        run_cmd_with_timeout -w '!=0'
+        if (($?==0)); then
+            pcent=$(tail -1 "$out_fn")
+            pcent=${pcent##* }
         else
-            subject="Not safe to unplug $org_name hotplug storage; file system(s) mounted"
-            body+=$'\n'"File systems mounted:"$'\n'"$buf"
-            dialog_type=error
-        fi  
+            pcent=unknown
+        fi
+        do_umounts
+        body="Final file system usage is $pcent"
 
-        # On-screen notification
-        # ~~~~~~~~~~~~~~~~~~~~~~
-        [[ ${hotplug_dev_note_screen_flag[i]} ]] \
-            && msg_on_screen "$dialog_type" "$subject" "$body"
+        spin_down_device "$whole_disk_dev"
+        subject="OK to unplug $org_name hotplug storage"
+        dialog_type=info
+    else
+        subject="Not safe to unplug $org_name hotplug storage; file system(s) mounted"
+        body+=$'\n'"File systems mounted:"$'\n'"$buf"
+        dialog_type=error
+    fi  
 
-        # E-mail notification
-        # ~~~~~~~~~~~~~~~~~~~
-        [[ ${hotplug_dev_note_email[i]} = '' ]] && continue
-        path=${hotplug_dev_path[i]}
+    # On-screen notification
+    # ~~~~~~~~~~~~~~~~~~~~~~
+    [[ $hotplug_dev_note_screen_flag ]] \
+        && msg_on_screen "$dialog_type" "$subject" "$body"
+
+    # E-mail notification
+    # ~~~~~~~~~~~~~~~~~~~
+    if [[ $hotplug_dev_note_email != '' ]]; then
+        path=$hotplug_dev_path
         body+=$'\n\nDevice:\n'"$path, also referenced as"$'\n'
         body+=$(find -L /dev/disk/by-path /dev/disk/by-id -samefile "$path")
         body+=$'\n\n'"There may be more information in log file $log_fn"
-        msg I "Notifying ${hotplug_dev_note_email[i]}: $subject"
-        echo "$body" | mailx -s "$subject" ${hotplug_dev_note_email[i]}
-    done
+        msg I "Notifying $hotplug_dev_note_email: $subject"
+        my_mailx -a "$hotplug_dev_note_email" -b "$body" -s "$subject"
+    fi
 
     fct "${FUNCNAME[0]}" 'returning'
     return

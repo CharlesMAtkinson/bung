@@ -1,0 +1,9 @@
+# MySQL defaults-file for use with bung's MySQL backup script
+#
+# Format reference: http://dev.mysql.com/doc/refman/5.5/en/option-files.html
+
+# {{ansible_managed}}
+
+[client]
+user=backup_user
+password={{mariadb_server_user_backup_user_password}}

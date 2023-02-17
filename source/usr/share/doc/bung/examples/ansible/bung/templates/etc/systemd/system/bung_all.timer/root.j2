@@ -1,0 +1,9 @@
+[Unit]
+Description=bung super_bu.sh all job timer
+
+[Timer]
+OnCalendar=*-*-* {{ time_of_day }}
+Unit=bung_all.service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,5 @@
 .ig
-Copyright (C) 2023 Charles Atkinson
+Copyright (C) 2023 Charles Michael Atkinson
 
 Permission is granted to make and distribute verbatim copies of this
 manual provided the copyright notice and this permission notice are
@@ -18,7 +18,7 @@ the original English.
 ..
 .\" No adjustment (ragged right)
 .na
-.TH mysql_bu 5 "11 Nov 2022" "Auroville" "Version 3.2.7"
+.TH mysql_bu 5 "10 Feb 2023" "Auroville" "Version 3.5.0"
 .SH NAME
 mysql_bu \- configuration for bung's mysqldump wrapper
 .SH SYNOPSIS
@@ -29,7 +29,19 @@ mysql_bu \- configuration for bung's mysqldump wrapper
 .HP
 \fBMount\fB\~=\~\fI... 
 .HP
-\fBMySQL\~= \fR[\fBcompression=\fIprogram\fR] \fR[\fBdefaults_file=\fIfile\fR] \fR[\fBdest_dir=\fIdir\fR] \fR[\fBdest_dir_usage_warning=\fI%\fR] \fR[\fBdest_dir_windows\fR] \fR[\fBexclude=\fIdb1\fR,\fIdb2\fR\~...] \fR[\fBretention=\fIdays\fR] \fR[\fBtimestamp_format=\fIformat\fR] 
+\fBMySQL\~= 
+\fR[\fBcompression=\fR[\fIprogram\fR]] 
+\fR[\fBdefaults_file=\fIfile\fR] 
+.br
+\fR[\fBdest_dir=\fIdir\fR] 
+\fR[\fBdest_dir_usage_warning=\fI%\fR] 
+\fR[\fBdest_dir_windows\fR] 
+.br
+\fR[\fBexclude=\fIdb1\fR,\fIdb2\fR\~...]
+.br
+\fR[\fBretention=\fInumber\fR[\fBdays\fR]]|\fB0\fR[\fBdays\fR]]|\fInumber\fBpercent_usage\fR[\fB,\fInumber\fBmin_old_backups\fR]|\fInumber\fBold_backups] 
+.br
+\fR[\fBtimestamp_format=\fIformat\fR] 
 .HP
 \fBOrganisation name\fB\~=\~\fI... 
 .HP
@@ -45,36 +57,28 @@ This page describes the keywords specific to mysql_bu
 The \fBbung-common\fR (5) man page describes
 the configuration file format
 and the common keywords ellipsised in the \fBSYNOPSIS\fR above
-.SH OPTIONS (keywords)
-.TP
-MySQL
-.RS
-.HP
-.nh
-\fBMySQL\~= \fR[\fBcompression=\fIprogram\fR] \fR[\fBdefaults_file=\fIfile\fR] \fR[\fBdest_dir=\fIdir\fR] \fR[\fBdest_dir_usage_warning=\fI%\fR] \fR[\fBdest_dir_windows\fR] \fR[\fBexclude=\fIdb1\fR,\fIdb2\fR\~...] \fR[\fBretention=\fIdays\fR] \fR[\fBtimestamp_format=\fIformat\fR] 
-.P
-Required.
-May be used multiple times.
+.SH OPTIONS (sub-keywords)
 .P
 \fBcompression\fR names the program to be used for compressing mysqldump output
 .br
 The program must be usable in a pipeline.
-The output filename extension will be:
-.br
-* .7z when the program name includes 7z
-.br
-* .bz2 when the program name includes bzip
-.br
-* .gz when the program is gzip
-.br
-Otherwise no extension
 .br
 Default: gzip.
+.P
+The output filename extension will be:
+.IP \(bu 4
+When the program name includes 7z: .7z
+.IP \(bu 4
+When the program name includes bzip: .bz2
+.IP \(bu 4
+When the program is gzip: .gz
+.IP \(bu 4
+Otherwise no extension
 .P
 \fBdefaults_file\fR 
 is the MySQL defaults file to use.
 .br
-If it does not begion with /,
+If it does not begin with /,
 it is relative to the bung configuration directory,
 /etc/bung for root, ~/etc/bung for others
 .br
@@ -104,9 +108,43 @@ Default: do not exclude any databases except
 information_schema, performance_schema and sys
 which are never backed up
 .P
-\fBretention\fR
+\fBretention=\fI...\fR
 .br
-Default: 28 days backup retention
+Specifies old backup files retention.
+.P
+Default: 28 day retention.
+.br
+.RS
+.P
+\fBretention=\fInumber\fR[\fBdays\fR]
+.br
+Specifies the number of days that these files are kept.
+.P
+\fBretention=0\fR[\fBdays\fR]
+.br
+Specifies no removal of old backup files.
+.P
+\fInumber\fBpercent_usage\fR[\fB,\fInumber\fBmin_old_backups\fR]
+.RS
+\fInumber\fBpercent_usage\fR
+.br
+Specifies repeatedly removing the oldest backup file until the file system usage is \fInumber\fR percent or less.
+.P
+When more than one backup is written to the same file system,
+this can result in all the old backup files
+being removed before the specified % file system usage is achieved
+because of space used by another backup.
+.P
+\fInumber\fBpercent_usage\fR\fB,\fInumber\fBmin_old_backups\fR
+.br
+Works like \fInumber\fBpercent_usage\fR except the most recent
+\fInumber\fBmin_old_backups\fR for all databases are not removed.
+.RE
+.P
+\fBretention=\fInumber\fBold_backups\fR 
+.br
+Specifies removing all but the most recent \fInumber\fR old backup files for all databases.
+.RE
 .P
 \fBtimestamp_format\fR timestamp_format is the date command format used to
 generate timestamps for use in backup file names
@@ -120,12 +158,12 @@ Environment variables are described in bung-common (5).
 Default directories are described in bung-common (5).
 .SH EXAMPLES
 Example mysql_bu configuration files are
-normally installed in /usr/share/bung/doc/examples
+normally installed in /usr/share/doc/bung/examples
 .SH AUTHOR
-Charles Atkinson bung@charlesmatkinson.org
+Charles Michael Atkinson bung@charlesmatkinson.org
 .SH SEE ALSO
 \fBbung-common\fR(5 and 8),
 \fBmysql_bu\fR(8)
 .br
 The bung user guide,
-normally installed in /usr/share/bung/doc
+normally installed in /usr/share/doc/bung

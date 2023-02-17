@@ -1,4 +1,4 @@
-# Copyright (C) 2020 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -53,6 +53,15 @@ function parse_conf_templated {
     local -r initial_pc_emsg=$pc_emsg
     unparsed_str=$value
 
+    # Note that a templated keyword was found in the conffile
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # This function is only called when function parse_conf finds a templated keyword
+    templated_keyword_found_flag=$true
+
+    # Set sub-keyword default values
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # There are none
+
     # Parse the subkeywords
     # ~~~~~~~~~~~~~~~~~~~~~
     # The syntax (any subkeyword order accepted) is:
@@ -60,7 +69,7 @@ function parse_conf_templated {
     #       template=<file>
     #       [hostname=<FQDN>] [identity_file=<file>] [password=<password>] [username=<name>]
     #       [device_type=<device type>]
-    #       [dest_dir=<dir>] [dest_dir_usage_warning=%] [retention=days]
+    #       [[dest_dir=<dir>] [dest_dir_usage_warning=<%>] [retention=...]]
     #       [git_root=<dir>]
     #       [tftp_root=<dir>] [tftp_server=<FQDN or IP address>]
     #       [timeout=<duration>]

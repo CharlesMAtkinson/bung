@@ -1,6 +1,6 @@
 #! /bin/bash
 
-# Copyright (C) 2021 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,8 +17,11 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
 
 # Purpose:
-#   Runs a pg_dump on enumerated databases except information_schema and
-#   performance_schema as part of the Backup Next Generation (bung) suite
+#   Backs up PostgreSQL databases as part of the Backup Next Generation (bung) suite.
+#   Specifically:
+#     * Backs up global data (users, groups, tablespaces, access permissions etc.) using pg_dumpall with --globals-only.
+#     * Backs up enumerated databases except information_schema and performance_schema using pg_dump for each.
+#     * Backs up database template1 using pg_dump.
 
 # Usage:
 #   Use -h option or refer to man pages
@@ -61,7 +64,7 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 #    |   |
 #    |   +-- parse_conf
 #    |   |   |
-#    |   |   +-- parse_conf_pg_dump
+#    |   |   +-- parse_conf_postgresql
 #    |   |
 #    |   +-- err_trap_email_for_report
 #    |   |
@@ -77,9 +80,7 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 #    |   |
 #    |   +-- postprocess_org_name_conf
 #    |   |
-#    |   +-- postprocess_pg_dump_conf
-#    |   |
-#    |   +-- err_trap_pg_dump_conf
+#    |   +-- err_trap_postgresql_conf
 #    |   |
 #    |   +-- postprocess_snapshot_conf
 #    |   |
@@ -97,6 +98,8 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 #    |
 #    +-- err_trap_files_and_dirs
 #    |
+#    +-- remove_old_backups
+#    |
 #    +-- backup
 #    |   |
 #    |   +-- my_pg_dump
@@ -104,6 +107,8 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 #    |   +-- report_dest_dir_usage
 #    |
 #    +-- finalise
+#        |
+#        +-- functions as documented in finalise.fun
 #
 # Utility functions called from various places:
 #     ck_file ck_uint err_trap_uint fct do_umounts msg
@@ -118,52 +123,44 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 #--------------------------
 function backup {
     fct "${FUNCNAME[0]}" 'started'
-    local array buf dest_dir enumerated_dbs db i
-    local dest_dir dest_dir_remote_flag dest_dir_usage_warning
+    local array buf enumerated_dbs db i
     local msg_class msg_part out_fn rc_fn
 
-    # For each configured pg_dump backup job
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    for ((i=0;i<=pg_idx;i++))
-    do
-        # Dump users, groups, tablespaces, access permissions etc
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        my_pg_dumpall "${dest_dirs[i]}" "${backup_retention[i]}" \
-            "${pg_dump_timestamp_format[i]}"
+    # Dump users, groups, tablespaces, access permissions etc
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    my_pg_dumpall "$dest_dir" "$retention" \
+        "$timestamp_format"
 
-        # Enumerate the databases
-        # ~~~~~~~~~~~~~~~~~~~~~~~
-        msg I 'Enumerating databases'
-        psql_out_fn=$tmp_dir_pg/psql.out
-        buf=$(cd "$tmp_dir_pg" 2>&1 \
-            && su -c 'psql -l' postgres 2>&1 >"$psql_out_fn"
-        )
-        [[ $buf != '' ]] && msg E "Error from cd or enumerating databases: $buf"
-        enumerated_dbs=$(
-            cat "$psql_out_fn" \
-            | awk '{print $1}' \
-            | grep -vE '^-|^List|^Name|^\||\:|template[0|1]|^\('
-        )
-        enumerated_dbs=$(echo $enumerated_dbs)    # Make space-separated list
-        msg I "Enumerated databases: $enumerated_dbs"
+    # Enumerate the databases
+    # ~~~~~~~~~~~~~~~~~~~~~~~
+    msg I 'Enumerating databases'
+    psql_out_fn=$tmp_dir_pg/psql.out
+    buf=$(cd "$tmp_dir_pg" 2>&1 \
+        && su -c 'psql -l' postgres 2>&1 >"$psql_out_fn"
+    )
+    [[ $buf != '' ]] && msg E "Error from cd or enumerating databases: $buf"
+    enumerated_dbs=$(
+        cat "$psql_out_fn" \
+        | awk '{print $1}' \
+        | grep -vE '^-|^List|^Name|^\||\:|template[0|1]|^\('
+    )
+    enumerated_dbs=$(echo $enumerated_dbs)    # Make space-separated list
+    msg I "Enumerated databases: $enumerated_dbs"
 
-        # Run pg_dump
-        # ~~~~~~~~~~~
-        my_pg_dump \
-            "$enumerated_dbs" \
-            "${pg_exclude[i]}" \
-            "${dest_dirs[i]}" \
-            "${pg_dump_timestamp_format[i]}" \
-            "${backup_retention[i]}"
-        (($?==0)) && my_pg_dump_error_flag=$false || my_pg_dump_error_flag=$true
+    # Run pg_dump
+    # ~~~~~~~~~~~
+    my_pg_dump \
+        "$enumerated_dbs" \
+        "$exclude" \
+        "$dest_dir" \
+        "$timestamp_format" \
+        "$retention"
+    (($?==0)) && my_pg_dump_error_flag=$false || my_pg_dump_error_flag=$true
 
-        # Log the destination directory usage
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        dest_dir=${dest_dirs[i]}
-        dest_dir_remote_flag=$false
-        dest_dir_usage_warning=${dest_dir_usage_warnings[i]}
-        report_dest_dir_usage
-    done
+    # Log the destination directory usage
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    dest_dir_remote_flag=$false
+    report_dest_dir_usage
 
     [[ $my_pg_dump_error_flag ]] \
         && msg E 'pg_dump error(s) for one or more databases (see warnings above)'
@@ -185,47 +182,38 @@ source "$BUNG_LIB_DIR/err_trap_email_for_report.fun" || exit 1
 
 #--------------------------
 # Name: err_trap_files_and_dirs
-# Purpose: error traps pg_dump backup specific files and directories
+# Purpose: error traps postgres_bu specific files and directories
 # Arguments: none
 # Return code: always 0; does not return on error
 #--------------------------
 function err_trap_files_and_dirs {
     fct "${FUNCNAME[0]}" 'started'
-    local buf defaults_fn emsg i pg_dump_dest_dir perms uid
-    local -r stat_out_regex='^[[:digit:]]+:[rwx-]+$'
+    local buf
 
-    # For each configured pg_dump job
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    emsg=
-    for ((i=0;i<=pg_idx;i++))
-    do
-        # Check the backup destination root directory
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        dest_dir=${dest_dirs[i]}
-        buf=$(ck_file "$dest_dir" d:rwx 2>&1)
-        if [[ $buf != '' ]]; then
-            emsg+=$msg_lf"backup destination root directory: $buf"
-        fi
-    done
-
-    [[ $emsg != '' ]] && msg E "$emsg"
+    # Check the backup destination root directory
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    buf=$(ck_file "$dest_dir" d:rwx 2>&1)
+    if [[ $buf != '' ]]; then
+        emsg+=$msg_lf"backup destination root directory: $buf"
+    fi
 
     fct "${FUNCNAME[0]}" 'returning'
     return
 }  # end of function err_trap_files_and_dirs
 
 source "$BUNG_LIB_DIR/err_trap_mount_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_notification_plug_in_conf.fun" || exit 1
 
 #--------------------------
-# Name: err_trap_pg_dump_conf
+# Name: err_trap_postgres_conf
 # Purpose:
-#   Error traps the pg_dump_bu-specific configuration
+#   Error traps the PostgreSQL subkeyword values
 # Arguments: none
 # Global variable usage: adds any error message to emsg, prefixed by $msg_lf
 # Output: none
 # Return value: 1 when an error is detected, 0 otherwise
 #--------------------------
-function err_trap_pg_dump_conf {
+function err_trap_postgres_conf {
     fct "${FUNCNAME[0]}" 'started'
     local buf compression i my_rc old_emsg
     local -r valid_exclude_regex='^[,[:alnum:]_-]+$'
@@ -236,39 +224,28 @@ function err_trap_pg_dump_conf {
     emsg=
     my_rc=0
 
-    # Nothing to do?
-    # ~~~~~~~~~~~~~~
-    if ((pg_idx<0)); then
-        emsg+=$msg_lf"No backup configured (no PostgreSQL keyword)"
-    fi
+    # Trap errors
+    # ~~~~~~~~~~~
+    buf=$dest_dir_usage_warning
+    err_trap_uint "$buf" "Invalid dest_dir_usage_warning" \
+        && ((buf>100)) \
+        && emsg+=$msg_lf"Invalid dest_dir_usage_warning % $buf (maximum 100)"
 
-    # For each configured pg_dump job
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    for ((i=0;i<=pg_idx;i++))
-    do
-        buf=${dest_dir_usage_warnings[i]}
-        err_trap_uint "$buf" "Invalid dest_dir_usage_warning" \
-            && ((buf>100)) \
-            && emsg+=$msg_lf"Invalid dest_dir_usage_warning % $buf (maximum 100)"
+    buf=$exclude
+    [[ $buf != '' && ! $buf =~ $valid_exclude_regex ]] \
+        && emsg+=$msg_lf"Invalid exclude '$buf' (must match regex $valid_exclude_regex)"
 
-        buf=${pg_exclude[i]}
-        [[ $buf != '' && ! $buf =~ $valid_exclude_regex ]] \
-            && emsg+=$msg_lf"Invalid exclude '$buf' (must match regex $valid_exclude_regex)"
-
-        buf=${backup_retention[i]}
-        if [[ $buf != '' ]]; then
-           err_trap_uint "$buf" "Invalid retention value"
-        fi
-    done
+    err_trap_retention_conf "$retention"
 
     [[ $emsg != '' ]] && my_rc=1
     emsg=$old_emsg$emsg
     fct "${FUNCNAME[0]}" "returning, rc $my_rc"
     return $my_rc
-}  # end of function err_trap_pg_dump_backup_conf
+}  # end of function err_trap_postgres_conf
 
 source "$BUNG_LIB_DIR/err_trap_post_hook_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_pre_hook_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_retention_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_shutdown.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_snapshot_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_uint.fun" || exit 1
@@ -297,13 +274,13 @@ function initialise {
 
     # Parse configuration file
     # ~~~~~~~~~~~~~~~~~~~~~~~~
-    emsg=
     local -A keyword_validation
     keyword_validation[name]='
         emailforreport
         logretention
         maxmemorysize
         mount
+        notificationplug_in 
         numberofopenfiles
         postgresql
         post_hook
@@ -312,7 +289,7 @@ function initialise {
         shutdown
         snapshot
     '
-    keyword_validation[repeat invalid]='
+    keyword_validation[repeat_invalid]='
         logretention
         maxmemorysize
         numberofopenfiles
@@ -323,7 +300,9 @@ function initialise {
         shutdown
     '
     local +r keyword_validation
+    postgresql_keyword_found_flag=$false
     parse_conf "$conf_fn"
+    [[ ! $postgresql_keyword_found_flag ]] && emsg+=$msg_lf"Keyword PostgreSQL is required"
     [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
 
     # Postprocess and error trap the configuration
@@ -350,11 +329,14 @@ function initialise {
     # Mount
     postprocess_mount_conf && err_trap_mount_conf
 
+    # Notification plug-in
+    err_trap_notification_plug_in_conf
+
     # Organisation name
     postprocess_org_name_conf "${org_name:-}" "${org_name_optarg:-}" "$opt_o_flag"
 
-    # pg_dump
-    postprocess_pg_dump_conf && err_trap_pg_dump_conf
+    # postgres
+    err_trap_postgres_conf
 
     # Post-hook
     err_trap_post_hook_conf
@@ -368,6 +350,7 @@ function initialise {
     # Snapshot
     postprocess_snapshot_conf && err_trap_snapshot_conf
 
+    [[ $wmsg != '' ]] && msg W "Error(s) in configuration file $conf_fn:$wmsg"
     [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
 
     # Finish if -C option (check the configuration)
@@ -408,17 +391,17 @@ function initialise {
 }  # end of function initialise
 
 source "$BUNG_LIB_DIR/msg.fun" || exit 1
-source "$BUNG_LIB_DIR/my_cat.fun" || exit 1
+source "$BUNG_LIB_DIR/my_mailx.fun" || exit 1
 
 #--------------------------
 # Name: my_pg_dump
 # Purpose: backs up PostgreSQL databases
 # Arguments:
 #   $1: $enumerated_dbs
-#   $2: ${pg_exclude[i]}
-#   $3: ${dest_dirs[i]}
-#   $4: ${pg_dump_timestamp_format[i]}
-#   $5: ${backup_retention[i]}
+#   $2: $exclude
+#   $3: $dest_dir
+#   $4: $timestamp_format
+#   $5: $retention
 # Return code: always 0; does not return on error
 #--------------------------
 function my_pg_dump {
@@ -436,8 +419,8 @@ function my_pg_dump {
     local timestamp_format=$4
     local retention=$5
 
-    # Removed any excluded databases from the enumerated list
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Remove any excluded databases from the enumerated list
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     unmatched_excludes=
     if [[ ${excludes:-} != '' ]]; then
         for db in ${exclude/,/ }
@@ -451,13 +434,13 @@ function my_pg_dump {
         done
     fi
     [[ $unmatched_excludes != '' ]] \
-        && msg W "Database(s) from 'exclude=' but not present:${unmatched_excludes/ /,}"
+        && msg W "'exclude=' database(s) not present:$unmatched_excludes"
 
     # Back up each database in turn
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     date=$(date "+$timestamp_format" 2>&1)
     (($?>0)) && msg E "date command problem: $date"
-    for db in $enumerated_dbs
+    for db in $enumerated_dbs template1
     do
         # Create destination directory
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -466,7 +449,7 @@ function my_pg_dump {
         [[ $buf != '' ]] && msg E "Unable to create directory $dir: $buf"
 
         # Build the pg_dump command
-        # ~~~~~~~~~~~~~~~~~~~~~~~~
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~
         pg_dump_cmd=(pg_dump)
         pg_dump_cmd+=('--format=custom')
         pg_dump_cmd+=('--lock-wait-timeout=6000000')    # Milliseconds
@@ -494,10 +477,6 @@ function my_pg_dump {
             msg W "Unexpected output from cd or pg_dump:$msg_lf$buf"
         fi
         msg I "Backup file created:$msg_lf$(/bin/ls -lh "$pg_dump_fn")"
-
-        # Remove old backups
-        # ~~~~~~~~~~~~~~~~~~
-        find "${find_pat%/*}" -maxdepth 1 -name "${find_pat##*/}" -mtime +$retention -execdir rm {} \;
     done
 
     fct "${FUNCNAME[0]}" "returning $my_rc"
@@ -508,9 +487,9 @@ function my_pg_dump {
 # Name: my_pg_dumpall
 # Purpose: backs up PostgreSQL global data
 # Arguments:
-#   $1: $dest_dirs[i]
-#   $2: $backup_retention[i]
-#   $3: $pg_dump_timestamp_format[i]
+#   $1: $dest_dir
+#   $2: $retention
+#   $3: $timestamp_format
 # Return code: always 0; does not return on error
 #--------------------------
 function my_pg_dumpall {
@@ -542,7 +521,6 @@ function my_pg_dumpall {
     # Generate the output file name and matching patterns
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     pg_dumpall_fn=$dest_dir/global-$date.sql
-    find_pat=$dest_dir/global-*.sql
 
     # Ensure the output file can be created
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -558,10 +536,6 @@ function my_pg_dumpall {
     fi
     msg I "Backup file created:$msg_lf$(/bin/ls -lh "$pg_dumpall_fn")"
 
-    # Remove old backups
-    # ~~~~~~~~~~~~~~~~~~
-    find "${find_pat%/*}" -maxdepth 1 -name "${find_pat##*/}" -mtime +$retention -execdir rm {} \;
-
     fct "${FUNCNAME[0]}" "returning $my_rc"
     return $my_rc
 }  # end of function my_pg_dumpall
@@ -569,9 +543,9 @@ function my_pg_dumpall {
 source "$BUNG_LIB_DIR/parse_conf.fun" || exit 1
 
 #--------------------------
-# Name: parse_conf_pg_dump
+# Name: parse_conf_postgresql
 # Purpose:
-#   Parses a pg_dump line from the configuration file
+#   Parses a PostgreSQL line from the configuration file
 #   Note: does not error trap sub-values, only traps syntactical errors
 # Arguments:
 #   $1 - the keyword as read from the configuration file (not normalised)
@@ -582,8 +556,6 @@ source "$BUNG_LIB_DIR/parse_conf.fun" || exit 1
 #       false
 #       true
 #   Set:
-#       pg_idx incremented
-#       pg_dump_* arrays initialised, maybe set
 #       pc_emsg appended with any error message
 # Output: none except via function fct
 # Return value:
@@ -592,7 +564,7 @@ source "$BUNG_LIB_DIR/parse_conf.fun" || exit 1
 #--------------------------
 function parse_conf_postgresql {
     fct "${FUNCNAME[0]}" "started with keyword: ${1:-}, value: ${2:-}, line_n: ${3:-}"
-    local buf dest idx msg_part my_rc src
+    local buf dest msg_part my_rc src
 
     # Parse arguments
     # ~~~~~~~~~~~~~~~
@@ -609,20 +581,26 @@ function parse_conf_postgresql {
     local -r initial_pc_emsg=$pc_emsg
     unparsed_str=$value
 
+    # Note that a PostgreSQL keyword was found in the conffile
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # This function is only called when function parse_conf finds a PostgreSQL keyword
+    postgresql_keyword_found_flag=$true
+
     # Set the sub-keyword default values
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    idx=$((++pg_idx))
-    backup_retention[idx]=28
-    dest_dirs[idx]=/var/backup/postgres
-    dest_dir_usage_warnings[idx]=80
-    pg_exclude[idx]=
-    pg_dump_timestamp_format[idx]=%Y-%m-%d@%H:%M:%S
+    retention=28
+    dest_dir=/var/backup/postgres
+    dest_dir_usage_warning=80
+    exclude=
+    timestamp_format=%Y-%m-%d@%H:%M:%S
 
     # Get any sub-keyword values
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # The configuration format/syntax:
-    #   PostgreSQL = [dest_dir=dir] [dest_dir_usage_warning=%]
-    #       [exclude=db1,db2 ...] [retention=days] [timestamp_format=format]
+    # Syntax:
+    #   PostgreSQL = [dest_dir=<dir>] [dest_dir_usage_warning=<%>]
+    #       [exclude=<db1,db2 ...>]
+    #       [retention=<number>[days]]|0[days]]|<number>percent_usage[,<number>min_old_backups]|<number>old_backups]
+    #       [timestamp_format=<format>]
     local -A subkey_validation
     subkey_validation[name]='
         dest_dir
@@ -631,14 +609,14 @@ function parse_conf_postgresql {
         retention
         timestamp_format
     '
-    subkey_validation[value required]='
+    subkey_validation[value_required]='
         dest_dir
         dest_dir_usage_warning
         exclude
         retention
         timestamp_format
     '
-    subkey_validation[value invalid]=' '
+    subkey_validation[value_invalid]=' '
     local +r subkey_validation
     while [[ $unparsed_str != '' ]]
     do
@@ -648,37 +626,15 @@ function parse_conf_postgresql {
     [[ $pc_emsg = $initial_pc_emsg ]] && my_rc=0 || my_rc=1
     fct "${FUNCNAME[0]}" "returning with rc $my_rc"
     return $my_rc
-}  # end of function parse_conf_pg_dump
+}  # end of function parse_conf_postgresql
 
+source "$BUNG_LIB_DIR/parse_conf_word.fun" || exit 1
 source "$BUNG_LIB_DIR/postprocess_email_for_report.fun" || exit 1
 source "$BUNG_LIB_DIR/postprocess_mount_conf.fun" || exit 1
-
-#--------------------------
-# Name: postprocess_pg_dump_conf
-# Purpose:
-#     Processes pg_dump values from the conf file
-# Arguments: none
-# Global variable usage:
-#   May change backup_retention[]
-# Output: none
-# Return value: always 0
-#--------------------------
-function postprocess_pg_dump_conf {
-    fct "${FUNCNAME[0]}" started
-    local i
-
-    # For each set of pg_dump configurations
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    for ((i=0;i<=pg_idx;i++))
-    do
-        :    # No postprocessing required
-    done
-
-    fct "${FUNCNAME[0]}" returning
-}  # End of function postprocess_pg_dump_conf
-
 source "$BUNG_LIB_DIR/postprocess_snapshot_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/report_dest_dir_usage.fun" || exit 1
+source "$BUNG_LIB_DIR/remove_old_backups.fun" || exit 1
+source "$BUNG_LIB_DIR/run_notification_plug_in.fun" || exit 1
 source "$BUNG_LIB_DIR/run_pre_hooks.fun" || exit 1
 source "$BUNG_LIB_DIR/usage.fun" || exit 1
 
@@ -692,5 +648,6 @@ do_snapshots
 do_mounts
 err_trap_files_and_dirs
 ((pre_hook_idx>-1)) && run_pre_hooks
+remove_old_backups -m tree -n '*.sql' -s "$dest_dir"
 backup
 finalise 0

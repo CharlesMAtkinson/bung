@@ -1,0 +1,7 @@
+[Unit]
+Description=bung super_bu.sh all job slice
+DefaultDependencies=no
+Before=slices.target
+
+[Slice]
+CPUQuota=25%

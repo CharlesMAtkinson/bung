@@ -22,7 +22,7 @@
 # Global variable usage:
 #   Write
 #       email_for_report[0]
-#       email_for_report_nolog_flag[0]
+#       email_for_report_no_log_flag[0]
 #       email_for_report_msg_level[0]
 # Output: none
 # Return value: always 0; does not return on error
@@ -33,7 +33,7 @@ function postprocess_email_for_report {
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     if ((email_for_report_idx==-1)); then
         email_for_report[++email_for_report_idx]=root
-        email_for_report_nolog_flag[email_for_report_idx]=$false
+        email_for_report_no_log_flag[email_for_report_idx]=$false
         email_for_report_msg_level[email_for_report_idx]=I
     fi
 

@@ -1,0 +1,19 @@
+---
+
+backup_rsync_client_known_hosts_lines: |
+  # ssh host keys for backup servers
+  
+  # Values found by, example:
+  # root@sysmgt3.iciti.av:~# ssh-keygen -F backup-rsync.iciti.av | sed 's/ found.*//'
+  # root@sysmgt3.iciti.av:~# ssh-keygen -F $(host backup-rsync.iciti.av | grep -v 'is an alias' | sed 's/.* //') | sed 's/ found.*//'
+  
+  # Host backup-rsync.iciti.av
+  |1|xp/EBRsRbLzA8HDovmT7cLCPoRo=|GldUfMj6q+DwJnwRhWP5ZFTs95s= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKxrXUxdGaHw7sHKASgYNHfp0fMnkSKAUNVIjwkawAuSRfTd1v/uEsE0qbpwIZjqz50FksBQ/GOY+pJBK743EWI=
+  # Host backup.noc.iciti.av
+  |1|liCBtzzqYxk2c86AOnMkz+X5L8c=|Rs+sEEJ/TAuSxvbFY5EBKD02E4I= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKxrXUxdGaHw7sHKASgYNHfp0fMnkSKAUNVIjwkawAuSRfTd1v/uEsE0qbpwIZjqz50FksBQ/GOY+pJBK743EWI=
+  # Host backup.sar.iciti.av
+  |1|HgSjaG2AnPNEmu74hieGCwnEzPU=|1AQ47j3/elbD6qutfA7ztxnKXTs= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBBemhzLcaFxsCrkhwjMOsvWekyOBRmx1/KMfiebJMhC1gcxhk1oYKJWxXwYWGC7Qeji330XrHCIENjZtLu9ugGs=
+  # Host 192.168.8.34
+  |1|0tqIK44uUBEx4CZAm7Y3d2dkSAI=|mpRLoqjNeTg7O/6m6e7iooWwvX4= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBBemhzLcaFxsCrkhwjMOsvWekyOBRmx1/KMfiebJMhC1gcxhk1oYKJWxXwYWGC7Qeji330XrHCIENjZtLu9ugGs=
+  # Host 192.168.8.93
+  |1|rcgVbx734op3fgyJ5+Lf6QMeXIE=|tQH9lXzSTHfxm0ZirCP9t/poQUc= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKxrXUxdGaHw7sHKASgYNHfp0fMnkSKAUNVIjwkawAuSRfTd1v/uEsE0qbpwIZjqz50FksBQ/GOY+pJBK743EWI=

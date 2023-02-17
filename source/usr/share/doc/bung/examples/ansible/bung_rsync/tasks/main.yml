@@ -1,0 +1,221 @@
+---
+# This role sets up bung+rsync backup to {{backup_host}}:
+# * When the managed node is not a DomU, set up ssh
+#   > On managed node:
+#     - Create ssh key pair
+#     - Create ssh host
+#   > On {{backup_host}}, install pubkey in /root/.ssh/authorized_keys2
+# * Storage setup
+#   > How much storage required?
+#   > On {{backup host}}
+#     - Create LV
+#     - Create file system
+#     - Add file system to /etc/fstab
+#     - Test and mount by running mount -a
+# Manual steps required after this role has run
+# * When the managed node is a DomU, on its Dom0
+#   * Create /etc/bung/whole_tree_to_<backup host's bare hostname>
+#   * Add whole_tree_to_<backup host's bare hostname> to /etc/bung/all
+# * When the managed node is not a DomU, on the managed node
+#   * Populate /root/.ssh/known_hosts
+#   * When / is on an LV, create /mnt/snap-root
+#   * When there is enough local storage to do a local backup,
+#     create /etc/bung/whole_tree
+#   * Create /etc/bung/whole_tree_to_<backup host's bare hostname>
+#   * Add the file(s) created above to /etc/bung/all
+
+# Set convenience variables
+# ~~~~~~~~~~~~~~~~~~~~~~~~~
+- name: Set convenience variable managed_host_bare_hostname
+  set_fact:
+    managed_host_bare_hostname={{ ansible_host \
+      | regex_replace('\..*', '') }}
+
+- name: Set convenience variable backup_host_short_hostname
+  set_fact:
+    backup_host_short_hostname={{ backup_host \
+      | regex_replace('\.iciti\.av', '') }}
+
+- name: Set convenience variable ssh_hostname
+  set_fact:
+    ssh_hostname={{ managed_host_bare_hostname }}_to_{{ backup_host_short_hostname }}
+
+- name: Set convenience variable file_system_label
+  set_fact:
+    file_system_label={{ ansible_host [:16] }}
+
+# Derive safe values from unsafe values
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# * Unsafe values cannot be used in when tests
+# * ansible_virtualization_type and ansible_virtualization_role are unsafe as
+#   shown by the value of "{{ ansible_virtualization_type | type_debug }}"
+- name: Set safe variable my_virtualization_role
+  set_fact:
+    my_virtualization_role={{ ansible_virtualization_role \
+      | regex_replace('[^a-z]', '') }}
+
+- name: Set safe variable my_virtualization_type
+  set_fact:
+    my_virtualization_type={{ ansible_virtualization_type \
+      | regex_replace('[^a-z]', '') }}
+
+# Set up ssh on the managed node (non DomUs only)
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+- name: Set up ssh on the managed node (non DomUs only)
+  when:
+    - my_virtualization_type != "xen"
+    - my_virtualization_role != "guest"
+  block:
+    - name: Get status of private key /root/.ssh/{{ ssh_hostname }}
+      stat:
+        path: /root/.ssh/{{ ssh_hostname }}
+      register: buf
+
+    - name: Generate key pair
+      when: not buf.stat.exists
+      shell: |
+        cd ~/.ssh \
+          && ssh-keygen -b 4096 -C {{ ssh_hostname }} \
+          -f {{ ssh_hostname }} -N '' -o -t rsa
+      register: my_debug
+
+    - name: Create /root/.ssh/config if it does not exist
+      copy:
+        content: "{{ ssh_config_header }}{{ '\n' }}"
+        dest: /root/.ssh/config
+        force: false
+        mode: "600"
+
+    - name: Is the ssh host already in /root/.ssh/config?
+      delegate_to: localhost
+      shell: |
+        shell ssh {{ localhost_ssh_opts }} root@{{ backup_host }}
+        grep -E "^[[:space:]]*{{ ssh_hostname }}^[[:space:]]*" /root/.ssh/config
+      ignore_errors: true
+      register: grep_ssh_host
+
+    - name: Create the ssh host
+      when: grep_ssh_host.rc != 0
+      blockinfile:
+        path: /root/.ssh/config
+        block: |
+          Host {{ ssh_hostname }}
+            Hostname {{ backup_host }}
+            Compression no
+            IdentityFile /root/.ssh/{{ ssh_hostname }}
+            User root
+        backup: true
+
+    - name: Create /root/.ssh/known_hosts if it does not exist
+      copy:
+        content: ""
+        dest: /root/.ssh/known_hosts
+        force: false
+        mode: "644"
+
+    - name: Add backup server ssh fingerprints to /root/.ssh/known_hosts
+      lineinfile:
+        backup: true
+        path: /root/.ssh/known_hosts
+        line: "{{ backup_rsync_client_known_hosts_lines }}"
+
+# Calculate backup storage requirement
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+- name: Calculate backup storage requirement
+  # Three times the used
+  shell: |
+    set -o pipefail
+    buf=$(/usr/bin/df --exclude-type=devtmpfs --exclude-type=tmpfs --local \
+      --output=used | grep -v Used)
+    arithmetic="("$(echo "$buf" | sed -e 's/ //g' | tr '\n' '+' \
+      | sed 's/+$//')")*3"
+    echo $arithmetic | bc
+  args:
+    executable: /bin/bash
+  register: buf
+- name: Set variable storage_required
+  set_fact:
+    storage_required={{ buf.stdout }}
+
+# Set up the backup server
+# ~~~~~~~~~~~~~~~~~~~~~~~~
+- name: Set up the backup server
+  when: "'aurinoco_computers' in group_names"
+  block:
+    - name: Set up ssh on the backup server (non DomUs only)
+      when:
+        - my_virtualization_type != "xen"
+        - my_virtualization_role != "guest"
+      block:
+        - name: "Is the public key already in {{ backup_host }} authorized_keys2?"
+          delegate_to: localhost
+          shell: |-
+            ssh {{ localhost_ssh_opts }} root@{{ backup_host }} \
+            "grep --fixed-strings --quiet {{ ssh_hostname }} ~/.ssh/authorized_keys2"
+          ignore_errors: true
+          register: grep_pubkey
+
+        - name: "Append pubkey to {{ backup_host }} authorized_keys2"
+          when: grep_pubkey.rc == 1
+          block:
+            - name: Get the public key content
+              command: |
+                cat "/root/.ssh/{{ ssh_hostname }}.pub"
+              register: pubkey
+            - name: "Append pubkey to {{ backup_host }}'s authorized_keys2"
+              delegate_to: localhost
+              shell: |
+                ssh {{ localhost_ssh_opts }} \
+                root@{{ backup_host }} "echo \
+                'command=\{{ dquote }}/usr/bin/validate_ssh_cmd\{{ dquote }}\
+                ,no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty \
+                {{ pubkey.stdout }}' \
+                >> /root/.ssh/authorized_keys2"
+
+    - name: "Copy script to {{ backup_host }}"
+      delegate_to: localhost
+      shell: |
+        scp -p {{ localhost_ssh_opts }} \
+        {{ role_path }}/scripts/alice_bung_rsync_helper.sh \
+        root@{{ backup_host }}:/tmp
+
+    - name: "Run script on {{ backup_host }} to set up storage"
+      delegate_to: localhost
+      shell: |
+        ssh {{ localhost_ssh_opts }} root@{{ backup_host }} \
+        /tmp/alice_bung_rsync_helper.sh -l {{ file_system_label }} \
+        -m /srv/backup/{{ ansible_fqdn }} -n {{ ansible_fqdn }} \
+        -s {{ storage_required }} -v {{ backup_host_vg_name }}
+
+- name: Inform non-Aurinoco users what needs doing on the backup server
+  when: "'aurinoco_computers' not in group_names"
+  debug:
+    msg: |
+      "In case it has not already been done"
+      "The backup server {{ backup_host }} needs to be set up with"
+      "* {{ ssh_hostname }}.pub content in authorized_keys2"
+      "* A {{ storage_required }} kB file system"
+      "    * Labelled {{ file_system_label }}"
+      "    * Mounted at /srv/backup/{{ ansible_fqdn }}"
+
+# bung conf
+# ~~~~~~~~~
+# This is not done by ALICE because:
+#   * Scripting to generate whole_tree would be complex.
+#   * bung+rsync is only used on hardware computers (DomU bung+rsync backups
+#     are done by their Dom0).
+#   * Creating whole_tree manually is trivial.
+#   * Given that we have few hardware computers, the benefit would not justify
+#     the scripting effort.
+- name: On DomU
+  when: my_virtualization_type == "xen" and my_virtualization_role == "guest"
+  debug:
+    msg: "In case it has not already been done, bung conf needs doing manually on the Dom0"
+- name: On VirtualBox VM computer
+  when: my_virtualization_type == "virtualbox"
+  debug:
+    msg: "In case it has not already been done, bung conf needs doing manually on the VirtualBox host with hook scripts shutdown_vboxvms.sh and start_vboxvms.sh"
+- name: On hardware computer
+  when: "'hardware_computers' in group_names"
+  debug:
+    msg: "In case it has not already been done, bung conf whole_tree backup needs doing manually"

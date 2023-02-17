@@ -1,4 +1,4 @@
-# Copyright (C) 2019 Charles Atkinson
+# Copyright (C) 2022 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,7 +17,7 @@
 #--------------------------
 # Name: err_trap_rsync_conf
 # Purpose:
-#   Error traps the rsync_bu-specific configuration
+#   Error traps the rsync_bu sub-keyword values
 # Arguments: none
 # Global variable usage: adds any error message to emsg, prefixed by $msg_lf
 # Output: none
@@ -25,8 +25,8 @@
 #--------------------------
 function err_trap_rsync_conf {
     fct "${FUNCNAME[0]}" 'started'
-    local buf i msg_part my_rc=0 old_emsg
-    local -r remote_host_timeout_regex='^\+?[[:digit:]]*\.?[[:digit:]]+(|d|h|m|s)$'
+    local buf i min__old_backups msg_part my_rc=0 num old_emsg
+    local -r remote_host_timeout_re='^\+?[[:digit:]]*\.?[[:digit:]]+(|d|h|m|s)$'
 
     # Nothing to do?
     # ~~~~~~~~~~~~~~
@@ -55,15 +55,12 @@ function err_trap_rsync_conf {
     fi
 
     if [[ $rsync_options = '' ]]; then
-        buf=$backup_retention
-        if [[ $buf != '' ]]; then
-            err_trap_uint "$buf" "Invalid retention value"
-        fi
+        err_trap_retention_conf "$retention"
 
         buf=$remote_host_timeout
-        if [[ ! $buf =~ $remote_host_timeout_regex ]]; then
+        if [[ ! $buf =~ $remote_host_timeout_re ]]; then
             msg_part=$msg_lf"Invalid remote_host_timeout value '$buf' (does"
-            emsg+=$msg_part" not match $remote_host_timeout_regex)"
+            emsg+=$msg_part" not match $remote_host_timeout_re)"
         fi
 
         buf=$rsync_timeout
@@ -79,7 +76,7 @@ function err_trap_rsync_conf {
     else
         [[ ${rsync_backup_dir:-} != '' ]] \
             && emsg+=$msg_lf'--backup-dir cannot be specified when options= is configured'
-        [[ ${backup_retention:-} != '' ]] \
+        [[ ${retention:-} != '' ]] \
             && emsg+=$msg_lf'Retention cannot be specified when options= is configured'
         [[ ${rsync_rsh:-} != '' ]] \
             && emsg+=$msg_lf'rsh cannot be specified when options= is configured'

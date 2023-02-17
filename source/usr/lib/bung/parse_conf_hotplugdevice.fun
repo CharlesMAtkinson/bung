@@ -1,4 +1,4 @@
-# Copyright (C) 2019 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -28,7 +28,6 @@
 #       line_n
 #       true and false
 #   Set:
-#       hotplug_dev_idx incremented
 #       pc_emsg appended with any error message
 # Output: none except via function fct
 # Return value:
@@ -37,7 +36,7 @@
 #--------------------------
 function parse_conf_hotplugdevice {
     fct "${FUNCNAME[0]}" "started with keyword: ${1:-}, value:${2:-}, line_n: ${3:-}"
-    local buf device_path idx msg_part my_rc unparsed_str
+    local buf device_path msg_part my_rc unparsed_str
 
     # Parse arguments
     # ~~~~~~~~~~~~~~~
@@ -54,6 +53,11 @@ function parse_conf_hotplugdevice {
     local -r initial_pc_emsg=$pc_emsg
     unparsed_str=$value
 
+    # Note that a 'Hotplug device' keyword was found in the conffile
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # This function is only called when function parse_conf finds a 'Hotplug device' keyword
+    hotplugdevice_keyword_found_flag=$true
+
     # Parse the value
     # ~~~~~~~~~~~~~~~
     # Hotplug device = device_path [missing_device_message_class=<class>]
@@ -68,15 +72,14 @@ function parse_conf_hotplugdevice {
     device_path=$parsed_word
 
     if [[ $device_path != '' ]]; then
-        idx=$((++hotplug_dev_idx))
-        hotplug_dev_path[idx]=$device_path
+        hotplug_dev_path=$device_path
 
         # Get any sub-keyword values
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~
-        hotplug_dev_missing_msgclass[idx]=
-        hotplug_dev_note_email[idx]=
-        hotplug_dev_note_email_wait[idx]=
-        hotplug_dev_note_screen_flag[idx]=
+        hotplug_dev_missing_msgclass=
+        hotplug_dev_note_email=
+        hotplug_dev_note_email_wait=
+        hotplug_dev_note_screen_flag=
         local -A subkey_validation
         subkey_validation[name]='
             email_wait

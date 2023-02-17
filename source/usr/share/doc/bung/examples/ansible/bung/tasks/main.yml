@@ -1,0 +1,101 @@
+---
+- name: Install fdisk
+  # Reqired by bung's sysinfo_bu. Not installed by default on Bullseye
+  apt:
+    name: "fdisk"
+    state: present
+
+- name: Copy the bung .deb
+  copy:
+    src: debs/
+    dest: /root/Downloads/
+    mode: 0644
+  register: copy
+
+- name: Install the bung .deb
+  # Easier to try and fail because it is already installed than to check
+  # versions
+  # TODO: check version
+  apt:
+    deb: "{{ copy.dest }}"
+
+- name: Synchronize general supporting files
+  synchronize:
+    src: files/
+    dest: /
+    rsync_opts:
+      - "--backup"
+      - "--chown=root:root"
+      - "--suffix=_before_{{ lookup('pipe', 'date +%d-%b-%Y@%H:%M') }}"
+
+- name: Initialise /etc/bung/all
+  template:
+    src: etc/bung/all/root.j2
+    dest: /etc/bung/all
+    mode: 0644
+    backup: true
+
+- name: Create /etc/bung/sysinfo
+  template:
+    src: etc/bung/sysinfo/root.j2
+    dest: /etc/bung/sysinfo
+    mode: 0644
+    backup: true
+
+- name: Add sysinfo line to /etc/bung/all
+  lineinfile:
+    path: /etc/bung/all
+    line: "Subsidiary script = sysinfo_bu sysinfo nice=19"
+
+- name: Create /etc/cron.daily/bung on daily boot computers
+  when: "'daily_boot_computers' in group_names"
+  copy:
+    content: "{{ bung_etc_cron_daily_content }}"
+    dest: /etc/cron.daily/bung
+    mode: 0755
+
+- debug:    # noqa unnamed-task
+    msg: "Create systemd service, slice and timer on non daily boot computers"
+- when: "'daily_boot_computers' not in group_names"
+  block:
+    - name: Initialise variables
+      set_fact:
+        conf_changed: false
+        hour: "{{ 24 | random(seed=ansible_fqdn) }}"
+        minute: "{{ 60 | random(seed=ansible_fqdn) }}"
+    - name: Initialise variables using variables in the previous initialisation
+      set_fact:
+        time_of_day: "{{ hour }}:{{ minute }}:00"
+    - name: Install files for systemd
+      synchronize:
+        src: files_for_systemd/
+        dest: /
+        rsync_opts:
+          - "--backup"
+          - "--chown=root:root"
+          - "--suffix=_before_{{ lookup('pipe', 'date +%d-%b-%Y@%H:%M') }}"
+      register: buf
+    - name: Conditionally set conf_changed
+      when: buf.changed
+      set_fact:
+        conf_changed: true
+    - name: Install bung_all.timer
+      template:
+        src: etc/systemd/system/bung_all.timer/root.j2
+        dest: /etc/systemd/system/bung_all.timer
+        backup: true
+        owner: root
+        group: root
+        mode: 0644
+      register: buf
+    - name: Conditionally set conf_changed
+      when: buf.changed
+      set_fact:
+        conf_changed: true
+    - name: Conditionally restart bung_all.timer
+      when: conf_changed
+      systemd:
+        daemon_reload: true
+        enabled: true
+        name: bung_all.timer
+        state: restarted

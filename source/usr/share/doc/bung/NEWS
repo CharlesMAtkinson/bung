@@ -1,4 +1,41 @@
 --------------------------------------------------------------------------------
+Version 3.5.0  10 Feb 2023
+
+* Issue 8: Notifications: create plug-in architecture
+
+--------------------------------------------------------------------------------
+Version 3.4.0  1 Feb 2023
+
+* Issue 6: Do not generate an error when the mailx command is not available
+
+Migration notes
+* In case the mailx command is available but you do not want bung to use it:
+  * Most scripts: use the "Email for report" keyword new value "none".
+    More in the bung_common (5) man page
+  * check_hotplug_usage: use the "Check hotplug usage" keyword "Email"
+    sub-keyword new value "none".
+    More in the check_hotplug_usage (5) man page
+
+--------------------------------------------------------------------------------
+Version 3.3.0  21 Jan 2023
+
+* Feature 18: more retention policies.
+  All backup scripts now remove old backups before backing up instead of after
+* Keywords MySQL and OpenLDAP can no longer be repeated in a single conffile 
+* postgres_bu now also backs up database template1
+* Documentation clarifications
+* rsync_restore: usability improvements
+
+Migration notes
+* In case the new retention policies better suit your needs, migrate to them.
+  They are <number>percent_usage[,<number>min_old_backups] and
+  retention=<number>old_backups 
+  More about retention in individual scripts' man (5) pages
+* In the unlikely case of repeated keyword errors, workaround by splitting the
+  conffile into conffiles with a single keyword and using them via hotplug_bu or
+  super_bu's "Subsidiary script"
+
+--------------------------------------------------------------------------------
 Version 3.2.7  11 Nov 2022
 
 * Bug #14591 initialise_1.scrippet: echo: write error: Broken pipe
@@ -753,9 +790,9 @@ Version 1.9.1  8 Jan 2014
 * Implemented Feature #119: Make rsync backup directory name configurable
 * Implemented Feature #125: rsync_bu.sh: provide options sub-keyword to allow
   entering rsync options directly
-* Implemented Feature #123: mysql_bu.sh: when the defaults-extra-file is morei
+* Implemented Feature #123: mysql_bu.sh: when the defaults-extra-file is more
   than root-readable, fix and warn
-* Fixed Bug #126: hotplug_bu.sh: not sending notification mails or updatingi
+* Fixed Bug #126: hotplug_bu.sh: not sending notification mails or updating
   usage log
 * Evolved some of the sample *.exclude files
 
@@ -837,7 +874,7 @@ Version 1.6  3 November 2013
 For migration:
 * Nothing required.  May want to migrate rdiff-backup jobs to rsync jobs using
   the new bung rsync sub-keyword "retention".  This addresses the problem of 
-  rdiff-backup's corrupted metatdata
+  rdiff-backup's corrupted metadata
 
 --------------------------------------------------------------------------------
 Version 1.5.4  21 October 2013
@@ -971,8 +1008,8 @@ Version 1.3    22 September 2013
 --------------------------------------------------------------------------------
 Version 1.2    18 September 2013
 
-* Fixed bug: "/opt/bung/rsync_bu.sh: line 138: rsync_cwrshexclude[i]: unbound
+* Fixed bug: "/opt/bung/rsync_bu.sh: line 138: rsync_exclude[i]: unbound
   variable"
 * Fixed bug: "Argument list too long when calling logger"
 * Enhancement: added --timeout option to rsync command
- Fixed bug: "Running fsck before necessary"
+* Fixed bug: "Running fsck before necessary"

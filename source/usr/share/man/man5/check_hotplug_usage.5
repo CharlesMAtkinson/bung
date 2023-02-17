@@ -1,5 +1,5 @@
 .ig
-Copyright (C) 2021 Charles Atkinson
+Copyright (C) 2023 Charles Michael Atkinson
 
 Permission is granted to make and distribute verbatim copies of this
 manual provided the copyright notice and this permission notice are
@@ -18,12 +18,12 @@ the original English.
 ..
 .\" No adjustment (ragged right)
 .na
-.TH check_hotplug_usage 5 "11 Nov 2022" "Auroville" "Version 3.2.7"
+.TH check_hotplug_usage 5 "10 Feb 2023" "Auroville" "Version 3.5.0"
 .SH NAME
 check_hotplug_usage - configuration for bung's check_hotplug_usage script
 .SH SYNOPSIS
 .HP
-\fBCheck hotplug usage\~=\~Organisation=\fIorganisation_name \fR[[\fBEmail=\fIemail_address\fR]\~...] \fR[\fBMaxBackupAge=\fIdays\fR] \fR[\fBMaxDeviceChangeDays=\fIdays\fR]
+\fBCheck hotplug usage\~=\~Organisation=\fIorganisation_name \fR[\fBEmail=\fIemail_address\fR|\fBnone\fR] \fR[\fBMaxBackupAge=\fIdays\fR] \fR[\fBMaxDeviceChangeDays=\fIdays\fR]
 .HP
 \fBEmail for report\fB\~=\~\fI... 
 .HP
@@ -43,38 +43,30 @@ This page describes the keywords specific to check_hotplug_usage
 The \fBbung-common\fR (5) man page describes
 the configuration file format
 and the common keywords ellipsised in the \fBSYNOPSIS\fR above
-.SH OPTIONS (keywords)
-.TP
-Check hotplug usage
-.RS
+.SH OPTIONS (sub-keywords)
 .HP
 .nh
-\fBCheck hotplug usage\~=\~Organisation=\fIorganisation_name
-\fR[[\fBEmail=\fIemail_address\fR] ...]
-\fR[\fBMaxBackupAge=\fIdays\fR]
-\fR[\fBMaxDeviceChangeDays=\fIdays\fR]
 .P
-Required
-.P
-\fBorganisation_name\fR sets the organisation name
+\fBOrganisation\fR sets the organisation name
 used in emails
-and in the name of the hotplug device backup history file,
+and in the name of the backup hotplug device usage history file,
 /var/log/bung/hotplug/\fIorganisation_name
 .P
-\fBEmail\fR sets an email address to send notification emails to
+\fBEmail\fR sets an email address to send notification emails to.
 .br
-\~\~\~\~Default: root
+May appear several times unless \fBnone\fR is used in which case it may appear only once.
+.br
+Default: root
 .P
 \fBMaxBackupAge\fR sets the the maximum number of days allowed since the
-organisation's last backup before a mail is sent
+organisation's last backup before a mail is sent.
 .br
-\~\~\~\~Default: 3 days
+Default: 3 days
 .P
 \fBMaxDeviceChangeDays\fR sets the the maximum number of days allowed since the
-the hotplug storage device was changed before a mail is sent
+the hotplug storage device was changed before a mail is sent.
 .br
-\~\~\~\~Default: 3 days
-.RE
+Default: 3 days
 .
 .SH ENVIRONMENT
 Environment variables are described in bung-common (5).
@@ -84,12 +76,12 @@ Default log: /var/log/bung/hotplug/\fIorganisation_name\fR
 Default directories are described in bung-common (5)
 .SH EXAMPLES
 Example check_hotplug_usage
-normally installed in /usr/share/bung/doc/examples
+normally installed in /usr/share/doc/bung/examples
 .SH AUTHOR
-Charles Atkinson bung@charlesmatkinson.org
+Charles Michael Atkinson bung@charlesmatkinson.org
 .SH SEE ALSO
 \fBbung-common\fR(5 and 8),
 \fBcheck_hotplug_usage\fR(8)
 .br
 The bung user guide,
-normally installed in /usr/share/bung/doc
+normally installed in /usr/share/doc/bung

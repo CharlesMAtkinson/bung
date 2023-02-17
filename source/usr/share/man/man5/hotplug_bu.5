@@ -1,5 +1,5 @@
 .ig
-Copyright (C) 2021 Charles Atkinson
+Copyright (C) 2023 Charles Michael Atkinson
 
 Permission is granted to make and distribute verbatim copies of this
 manual provided the copyright notice and this permission notice are
@@ -18,7 +18,7 @@ the original English.
 ..
 .\" No adjustment (ragged right)
 .na
-.TH hotplug_bu 5 "11 Nov 2022" "Auroville" "Version 3.2.7"
+.TH hotplug_bu 5 "10 Feb 2023" "Auroville" "Version 3.5.0"
 .SH NAME
 hotplug_bu \- configuration for bung's hotplug_bu script
 .SH SYNOPSIS
@@ -105,7 +105,7 @@ not be unplugged.
 .br
 The final notification either advises that the hotplug device is no longer in
 use and can be unplugged or that it should not be unplugged because
-one or more a file systems on it are mounted.
+it was not unmounted.
 .RE
 .
 .SH ENVIRONMENT
@@ -114,12 +114,12 @@ Environment variables are described in bung-common (5).
 Default directories are described in bung-common (5).
 .SH EXAMPLES
 Example hotplug_bu configuration files are
-normally installed in /usr/share/bung/doc/examples
+normally installed in /usr/share/doc/bung/examples
 .SH AUTHOR
-Charles Atkinson bung@charlesmatkinson.org
+Charles Michael Atkinson bung@charlesmatkinson.org
 .SH SEE ALSO
 \fBbung-common\fR(5 and 8),
 \fBhotplug_bu\fR(8)
 .br
 The bung user guide,
-normally installed in /usr/share/bung/doc
+normally installed in /usr/share/doc/bung

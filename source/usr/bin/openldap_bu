@@ -1,6 +1,6 @@
 #! /bin/bash
 
-# Copyright (C) 2021 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -69,8 +69,6 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 #    |   |
 #    |   +-- err_trap_shutdown
 #    |   |
-#    |   +-- postprocess_openldap_conf
-#    |   |
 #    |   +-- err_trap_openldap_conf
 #    |   |
 #    |   +-- postprocess_org_name_conf
@@ -100,6 +98,8 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 #    |   +-- report_dest_dir_usage
 #    |
 #    +-- finalise
+#        |
+#        +-- functions as documented in finalise.fun
 #
 # Utility functions called from various places:
 #     ck_file do_umounts err_trap_uint fct msg
@@ -115,7 +115,7 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 function backup {
     fct "${FUNCNAME[0]}" 'started'
     local buf cmd msg_class msg_part tgz timestamp
-    local dest_dir dest_dir_remote_flag dest_dir_usage_warning
+    local dest_dir_remote_flag
 
     # Generate LDAP Directory Interchange Format (LDIF) backups
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -128,10 +128,10 @@ function backup {
     buf=$($cmd 2>&1 >/tmp/users.ldif)
     [[ $buf != '' ]] && msg W "Problem generating LDIF of user database: $buf"
 
-    # Create tarchive
-    # ~~~~~~~~~~~~~~~
+    # Create backup tarball
+    # ~~~~~~~~~~~~~~~~~~~~~
     timestamp=$(date "+$fn_date_format")
-    tgz=${dest_dirs[0]}/openldap_backup.$timestamp.tar.gz
+    tgz=$dest_dir/openldap_backup.$timestamp.tar.gz
     buf=$(
         tar \
             --create \
@@ -151,15 +151,9 @@ function backup {
         msg E "Problem tarchiving: $buf"
     fi
 
-    # Remove old tarchives
-    # ~~~~~~~~~~~~~~~~~~~~
-    find "${dest_dirs[0]}" -maxdepth 1 -type f -name "openldap_backup.*.tar.gz" -mtime +$backup_retention -execdir rm {} \;
-
     # Log the destination directory usage
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    dest_dir=${dest_dirs[0]}
     dest_dir_remote_flag=$false
-    dest_dir_usage_warning=${dest_dir_usage_warnings[0]}
     report_dest_dir_usage
 
     fct "${FUNCNAME[0]}" 'returning'
@@ -182,13 +176,12 @@ source "$BUNG_LIB_DIR/err_trap_email_for_report.fun" || exit 1
 #--------------------------
 function err_trap_files_and_dirs {
     fct "${FUNCNAME[0]}" 'started'
-    local buf dir my_emsg
+    local my_emsg
 
     my_emsg=
-    dir=${dest_dirs[0]}
-    buf=$(ck_file "$dir" d:rwx 2>&1)
+    buf=$(ck_file "$dest_dir" d:rwx 2>&1)
     if [[ $buf != '' ]]; then
-        my_emsg+=$msg_lf"destination directory: $buf"
+        my_emsg+=$msg_lf"destination directory: $dest_dir"
     fi
 
     if [[ $my_emsg != '' ]]; then
@@ -200,6 +193,7 @@ function err_trap_files_and_dirs {
 }  # end of function err_trap_files_and_dirs
 
 source "$BUNG_LIB_DIR/err_trap_mount_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_notification_plug_in_conf.fun" || exit 1
 
 #--------------------------
 # Name: err_trap_openldap_conf
@@ -208,9 +202,9 @@ source "$BUNG_LIB_DIR/err_trap_mount_conf.fun" || exit 1
 # Arguments: none
 # Global variable usage:
 #   Read:
-#       dest_dirs[0]
-#       dest_dir_usage_warnings[0]
-#       backup_retention[0]
+#       dest_dir
+#       dest_dir_usage_warning
+#       retention
 #   written:
 #       emsg (initialise's): appended with any error messages
 # Output: none
@@ -227,20 +221,19 @@ function err_trap_openldap_conf {
 
     # Error traps
     # ~~~~~~~~~~~
-    # Cannot check the directory; it may be on a file system that
-    # is not yet mounted
-    if [[ ${dest_dirs[0]:-} = '' ]]; then
+    # Cannot check the directory; it may be on a file system that is not yet mounted
+    if [[ ${dest_dir:-} = '' ]]; then
         emsg+=$msg_lf'dest_dir is required'
     fi
 
-    buf=${dest_dir_usage_warnings[0]}
+    buf=$dest_dir_usage_warning
     if err_trap_uint "$buf" "Invalid dest_dir_usage_warning"; then
         if ((buf>100)); then
             emsg+=$msg_lf"Invalid dest_dir_usage_warning % $buf (maximum 100)"
         fi
     fi
 
-    err_trap_uint "${backup_retention[0]}" "Invalid backup_retention"
+    err_trap_retention_conf "$retention"
 
     # Return
     # ~~~~~~
@@ -258,6 +251,7 @@ function err_trap_openldap_conf {
 
 source "$BUNG_LIB_DIR/err_trap_post_hook_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_pre_hook_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_retention_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_snapshot_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_shutdown.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_uint.fun" || exit 1
@@ -281,18 +275,17 @@ function initialise {
     # Set traps
     # Create and lock the PID file
     # Create temporary directory
-    source $BUNG_LIB_DIR/initialise_1.scrippet || exit 1
+    source "$BUNG_LIB_DIR/initialise_1.scrippet" || exit 1
 
     # Parse configuration file
     # ~~~~~~~~~~~~~~~~~~~~~~~~
-    backup_retention[0]=28
-    emsg=
     # Note: ensure a space on both sides of each string in the arrays
     local -A keyword_validation
     keyword_validation[name]='
         emailforreport
         logretention
         mount
+        notificationplug_in 
         openldap
         organisationname
         post_hook
@@ -300,7 +293,7 @@ function initialise {
         shutdown
         snapshot
     '
-    keyword_validation[repeat invalid]='
+    keyword_validation[repeat_invalid]='
         logretention
         openldap
         organisationname
@@ -310,6 +303,7 @@ function initialise {
     '
     local +r keyword_validation
     parse_conf "$conf_fn"
+    [[ ! $openldap_keyword_found_flag ]] && emsg+=$msg_lf"Keyword OpenLDAP is required"
     [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
 
     # Postprocess and error trap the configuration
@@ -328,11 +322,13 @@ function initialise {
     postprocess_mount_conf
     err_trap_mount_conf
 
+    # Notification plug-in
+    err_trap_notification_plug_in_conf
+
     # Organisation name
     postprocess_org_name_conf "${org_name:-}" "${org_name_optarg:-}" "$opt_o_flag"
 
     # OpenLDAP
-    postprocess_openldap_conf
     err_trap_openldap_conf
 
     # Post-hook
@@ -347,6 +343,7 @@ function initialise {
     # Snapshot
     postprocess_snapshot_conf && err_trap_snapshot_conf
 
+    [[ $wmsg != '' ]] && msg W "Error(s) in configuration file $conf_fn:$wmsg"
     [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
 
     # Finish if -C option (check the configuration)
@@ -362,7 +359,7 @@ function initialise {
 }  # end of function initialise
 
 source "$BUNG_LIB_DIR/msg.fun" || exit 1
-source "$BUNG_LIB_DIR/my_cat.fun" || exit 1
+source "$BUNG_LIB_DIR/my_mailx.fun" || exit 1
 source "$BUNG_LIB_DIR/parse_conf.fun" || exit 1
 
 #--------------------------
@@ -379,7 +376,6 @@ source "$BUNG_LIB_DIR/parse_conf.fun" || exit 1
 #       true and false
 #       line_n
 #   Set:
-#       openldap_idx incremented
 #       pc_emsg appended with any error message
 #       unparsed_str
 # Output: none except via function fct
@@ -406,31 +402,41 @@ function parse_conf_openldap {
     local -r initial_pc_emsg=$pc_emsg
     unparsed_str=$value
 
+    # Note that an OpenLDAP keyword was found in the conffile
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # This function is only called when function parse_conf finds an OpenLDAP keyword
+    openldap_keyword_found_flag=$true
+
+    # Set the sub-keyword default values
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    dest_dir=/var/backup/openldap
+    dest_dir_usage_warning=80
+    retention=28
+
     # Get any sub-keyword values
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~
-    ((openldap_idx++))
     # The value format/syntax is:
-    #    OpenLDAP = [dest_dir=dir] [dest_dir_usage_warning=%]
-    #           [retention=days]
+    #    OpenLDAP = [dest_dir=<dir>] [dest_dir_usage_warning=<%>]
+    #        [retention=<number>[days]|0[days]]|<number>percent_usage[,<number>min_old_backups]|<number>old_backups]
     local -A subkey_validation
     subkey_validation[name]='
         dest_dir
         dest_dir_usage_warning
         retention
     '
-    subkey_validation[value required]='
+    subkey_validation[value_required]='
         dest_dir
         dest_dir_usage_warning
         retention
     '
-    subkey_validation[value invalid]=' '
+    subkey_validation[value_invalid]=' '
     local +r subkey_validation
     while [[ $unparsed_str != '' ]]
     do
        parse_conf_subkey_value "${FUNCNAME[0]}" $line_n
     done
 
-    [[ $pc_emsg = $pc_emsg ]] && my_rc=0 || my_rc=1
+    [[ $pc_emsg = $initial_pc_emsg ]] && my_rc=0 || my_rc=1
     fct "${FUNCNAME[0]}" "returning with rc $my_rc"
     return $my_rc
 }  # end of function parse_conf_openldap
@@ -438,36 +444,11 @@ function parse_conf_openldap {
 source "$BUNG_LIB_DIR/parse_conf_word.fun" || exit 1
 source "$BUNG_LIB_DIR/postprocess_email_for_report.fun" || exit 1
 source "$BUNG_LIB_DIR/postprocess_mount_conf.fun" || exit 1
-
-#--------------------------
-# Name: postprocess_openldap_conf
-# Purpose:
-#   Postprocesses the OpenLDAP configuration (sets defaults)
-# Arguments: none
-# Global variable usage:
-#   Read and conditioally set:
-#       dest_dirs[0]
-#       dest_dir_usage_warnings[0]
-#       backup_retention[0]
-# Output: none except via function fct
-# Return value: always 0
-#--------------------------
-function postprocess_openldap_conf {
-    fct "${FUNCNAME[0]}" started
-
-    # Set sub-keyword default values if no values configured
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [[ ${dest_dirs[0]:-} = '' ]] && dest_dirs[0]=/var/backup/openldap
-    [[ ${dest_dir_usage_warnings[0]:-} = '' ]] && dest_dir_usage_warnings[0]=80
-    [[ ${backup_retention[0]:-} = '' ]] && backup_retention[0]=28
-
-    fct "${FUNCNAME[0]}" 'returning 0'
-    return
-}  # end of function postprocess_openldap_conf
-
 source "$BUNG_LIB_DIR/postprocess_org_name_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/postprocess_snapshot_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/remove_old_backups.fun" || exit 1
 source "$BUNG_LIB_DIR/report_dest_dir_usage.fun" || exit 1
+source "$BUNG_LIB_DIR/run_notification_plug_in.fun" || exit 1
 source "$BUNG_LIB_DIR/run_pre_hooks.fun" || exit 1
 source "$BUNG_LIB_DIR/usage.fun" || exit 1
 
@@ -481,5 +462,6 @@ initialise "${@:-}"
 do_snapshots
 do_mounts
 err_trap_files_and_dirs
+remove_old_backups -m dir -n "openldap_backup.*.tar.gz" -s "$dest_dir"
 backup
 finalise 0

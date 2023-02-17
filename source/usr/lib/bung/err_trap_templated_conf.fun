@@ -26,7 +26,7 @@
 function err_trap_templated_conf {
     fct "${FUNCNAME[0]}" 'started'
     local array buf i msg_part my_rc old_emsg subkeyword
-    local -r fqdn_or_ip_address_regex='^(([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,6}|[[:digit:]]+(.[[:digit:]]+){3})$'
+    local -r fqdn_or_ip_address_re='^(([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,6}|[[:digit:]]+(.[[:digit:]]+){3})$'
 
     old_emsg=$emsg
     emsg=
@@ -70,8 +70,7 @@ function err_trap_templated_conf {
                 && ((buf>100)) \
                 && emsg+=$msg_lf"Invalid $subkeyword % $buf (maximum 100)"
         fi
-        [[ ${retention:-} != '' ]] \
-            && err_trap_uint "$retention" 'Invalid retention value'
+        err_trap_retention_conf "$retention"
     else
         msg_part=' is invalid without dest_dir'
         [[ "${dest_dir_usage_warning:-}" != '' ]] \
@@ -96,7 +95,7 @@ function err_trap_templated_conf {
             && emsg+=$msg_lf"tftp_root is invalid without tftp_server"
     fi
     if [[ "${tftp_server:-}" != '' ]]; then
-        [[ ! $tftp_server =~ $fqdn_or_ip_address_regex ]] \
+        [[ ! $tftp_server =~ $fqdn_or_ip_address_re ]] \
             && emsg+=$msg_lf"$tftp_server is not valid FQDN or IPv4 address"
         [[ "${tftp_root:-}" = '' ]] \
             && emsg+=$msg_lf"tftp_server is invalid without tftp_root"

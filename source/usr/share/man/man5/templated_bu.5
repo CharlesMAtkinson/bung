@@ -1,5 +1,5 @@
 .ig
-Copyright (C) 2021 Charles Atkinson
+Copyright (C) 2023 Charles Michael Atkinson
 
 Permission is granted to make and distribute verbatim copies of this
 manual provided the copyright notice and this permission notice are
@@ -18,7 +18,7 @@ the original English.
 ..
 .\" No adjustment (ragged right)
 .na
-.TH templated_bu 5 "11 Nov 2022" "Auroville" "Version 3.2.7"
+.TH templated_bu 5 "10 Feb 2023" "Auroville" "Version 3.5.0"
 .SH NAME
 templated_bu \- configuration for bung's templated backup script
 .SH SYNOPSIS
@@ -45,7 +45,9 @@ templated_bu \- configuration for bung's templated backup script
 .br
 \fR[\fBdevice_type=\fIdevice type\fR]
 .br
-\fR[\fBdest_dir=\fIdir\fR] [\fBdest_dir_usage_warning=\fI%\fR] [\fBretention=\fIdays\fR]
+\fR[\fBdest_dir=\fIdir\fR 
+[\fBdest_dir_usage_warning=\fI%\fR]
+\fR[\fBretention=\fInumber\fR[\fBdays\fR]]|\fB0\fR[\fBdays\fR]]|\fInumber\fBpercent_usage\fR[\fB,\fInumber\fBmin_old_backups\fR]|\fInumber\fBold_backups]]
 .br
 \fR[\fBgit_root=\fIdir\fR]
 .br
@@ -59,27 +61,7 @@ This page describes the keywords specific to templated_bu
 The \fBbung-common\fR (5) man page describes
 the configuration file format
 and the common keywords not detailed in the \fBSYNOPSIS\fR above
-.SH OPTIONS (keywords)
-.TP
-templated
-.RS
-.HP
-.nh
-\fBtemplated\~= \fBtemplate=\fIfile\fR
-.br
-\fR[\fBhostname=\fIFQDN\fR] [\fBidentity_file=\fIfile\fR] [\fBpassword=\fIpassword\fR] [\fBusername=\fIname\fR]
-.br
-\fR[\fBdevice_type=\fIdevice type\fR]
-.br
-\fR[\fBdest_dir=\fIdir\fR] [\fBdest_dir_usage_warning=\fI%\fR] [\fBretention=\fIdays\fR]
-.br
-\fR[\fBgit_root=\fIdir\fR]
-.br
-\fR[\fBtftp_root=\fIdir\fR] [\fBtftp_server=\fIFQDN or IP address\fR]
-.br
-\fR[\fBtimeout=\fIduration\fR]
-.P
-Required
+.SH OPTIONS (sub-keywords)
 .P
 \fBtemplate\fR is the file containing the commands to be executed after substitution.
 .br
@@ -93,6 +75,8 @@ sets a token value which may be used in the template, normally to allow a single
 .P
 \fBdest_dir\fR
 sets a token value which may be used in the template. 
+.P
+When \fBdest_dir\fR is specified, old backups under \fBdest_dir\fR are removed and file system usage is reported
 .br
 \fBtemplated_bu\fR treats \fBdest_dir\fR as a directory in which files are created by the template.
 .P
@@ -102,10 +86,46 @@ after the backup is finished.
 Use dest_dir_usage_warning=0 to disable.
 .br
 Default: 80
-.P
-\fBretention\fR specifies the number of days that files are kept in dest_dir.
 .br
-Default: 28
+Invalid when \fBdest_dir\fR is not specified.
+.P
+\fBretention=\fI...\fR
+.br
+Specifies \fBdest_dir\fR old files retention and empty directories removal.
+.br
+Default: 28 day files retention and empty directories removal.
+.br
+Invalid when \fBdest_dir\fR is not specified.
+.RS
+.P
+\fBretention=\fInumber\fR[\fBdays\fR]
+.br
+Specifies the number of days that these files are kept.
+.P
+\fBretention=0\fR[\fBdays\fR]
+.br
+Specifies no files or empty directories removal.
+.P
+\fInumber\fBpercent_usage\fR[\fB,\fInumber\fBmin_old_backups\fR]
+.RS
+\fInumber\fBpercent_usage\fR
+.br
+Specifies repeatedly removing the oldest files until the file system usage is \fInumber\fR percent or less.
+.P
+When there are other files on the same file system,
+this can result in all the old files
+being removed before the specified % file system usage is achieved.
+.P
+\fInumber\fBpercent_usage\fR\fB,\fInumber\fBmin_old_backups\fR
+.br
+Works like \fInumber\fBpercent_usage\fR except the most recent
+\fInumber\fBmin_old_backups\fR old files are not removed.
+.RE
+.P
+\fBretention=\fInumber\fBold_backups\fR 
+.br
+Specifies removing all but the most recent \fInumber\fR old files.
+.RE
 .P
 \fBtftp_root\fR and \fBtftp_server\fR
 set token values which may be used in the template, normally to specify a TFTP server and directory.
@@ -139,7 +159,7 @@ Default directories are described in bung-common (5).
 Example templated_bu configuration files are
 normally installed in /usr/share/doc/bung/examples/script.conf/
 .SH AUTHOR
-Charles Atkinson bung@charlesmatkinson.org
+Charles Michael Atkinson bung@charlesmatkinson.org
 .SH SEE ALSO
 \fBbung-common\fR(5 and 8),
 \fBtemplated_bu\fR(8)

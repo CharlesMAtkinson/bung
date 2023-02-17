@@ -1,4 +1,4 @@
-# Copyright (C) 2022 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -116,20 +116,14 @@
 
     # Initialise some global numeric variables
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # Variables specific to individual scripts which may be set in config files
-    # are defaulted in the individual scripts
-    ck_hotplug_usage_idx=-1    # TODO: move to hotplug_bu
     email_for_report_idx=-1
-    hotplug_dev_idx=-1         # TODO: move to hotplug_bu
     mount_done_mountpoint_idx=-1
     mount_idx=-1
-    openldap_idx=-1            # TODO: move to openldap_bu
-    pg_idx=-1                  # TODO: move to postgres_bu
+    notification_plug_in_idx=-1
     pre_hook_idx=-1
     post_hook_idx=-1
     snapshot_idx=-1
     subsidiaryscript_idx=-1
-    sysinfo_idx=-1             # TODO: move to sysinfo_bu
     readonly lvremove_count_max=100
 
     # Initialise local regex variables
@@ -383,7 +377,7 @@
     if [[ ! $subsidiary_mode_flag && $script_name != hotplug_bu_launcher ]]; then
         local my_pgid=$(ps -o pgid= -p $$)
         if (( my_pgid!=$$)); then
-            msg I "Re-launching in dedicated process group"
+            msg I "Re-launching in dedicated process group (to facilitate killing the whole bung process tree)"
 
             # Remove any -L (log_dir) option
             for ((i=0;i<${#args[*]};i++))

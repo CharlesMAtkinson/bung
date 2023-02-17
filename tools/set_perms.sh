@@ -485,6 +485,7 @@ function set_perms {
     executables+=('source/usr/share/doc/bung/examples/hook scripts/bung_pre_hook_for_routers_and_switches.sh')
     executables+=('source/usr/share/doc/bung/examples/hook scripts/shutdown_vboxvms.sh')
     executables+=('source/usr/share/doc/bung/examples/hook scripts/start_vboxvms.sh')
+    executables+=('source/usr/share/doc/bung/examples/notification_plug-ins/mailx.sh')
     executables+=($(echo source/usr/share/doc/bung/examples/templated_bu/*.{expect,sh}))
     executables+=(tools/git-store-meta/git-store-meta.pl)
     executables+=($(echo tools/git-store-meta/hooks-for-bung/{post-checkout,post-merge,pre-commit}))

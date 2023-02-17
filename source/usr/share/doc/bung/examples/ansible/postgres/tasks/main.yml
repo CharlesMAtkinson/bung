@@ -1,0 +1,34 @@
+---
+- debug:  # noqa unnamed-task
+    msg: "Started running role {{ role_name }}"
+
+- name: Install postgresql package
+  apt:
+    name: postgresql
+    state: present
+
+- name: Conditionally configure bung to backup postgres
+  block:
+
+    - name: Create /var/backup/postgres
+      file:
+        path: /var/backup/postgres
+        state: directory
+        mode: "755"
+
+    - name: Create /etc/bung/postgres
+      template:
+        src: etc/bung/postgres/root.j2
+        dest: /etc/bung/postgres
+        backup: true
+        mode: "644"
+
+    - name: Add to the bung all conffile
+      lineinfile:
+        path: /etc/bung/all
+        line: "Subsidiary script = postgres_bu postgres"
+
+  when: "'bung_computers' in group_names"
+
+- debug:  # noqa unnamed-task
+    msg: "Ending role {{ role_name }}"

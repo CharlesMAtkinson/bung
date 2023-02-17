@@ -20,8 +20,8 @@
 #     Processes rsync values from the conf file
 # Arguments: none
 # Global variable usage:
-#   Sets backup_retention_0_nowarn_flag[]
-#   May change backup_retention[]
+#   Sets retention_0_nowarn_flag[]
+#   May change retention[]
 # Output: none
 # Return value: always 0
 #--------------------------
@@ -30,6 +30,7 @@ function postprocess_rsync_conf {
     local hostname identityfile username
     local -r remote_dir_regex='^[^/:]*:'
     local -r trailing_slash_regex='/$'
+    local -r retention_0_days_nowarn_re='0(days)?,nowarn$'
 
     # Do nothing when there was no rsync keyword
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -71,8 +72,8 @@ function postprocess_rsync_conf {
         # pattern because err_trap_rsync_conf assumes that any values come
         # from the configration file when checking for sub-keywords which cannot
         # validly be used when the "options" sub-keyword is used
-        [[ ${backup_retention:-} = '' ]] \
-            && backup_retention=28
+        [[ ${retention:-} = '' ]] \
+            && retention=28
         [[ ${rsync_backup_dir:-} = '' ]] \
             && rsync_backup_dir='_Changed and deleted files'
         [[ ${rsync_nocompression_flag:-} = '' ]] \
@@ -84,13 +85,13 @@ function postprocess_rsync_conf {
         [[ ${rsync_verbose_level:-} = '' ]] \
             && rsync_verbose_level=1
 
-        # Set backup_retention_0_nowarn_flag
+        # Set retention_0_nowarn_flag
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        if [[ $backup_retention != '0,nowarn' ]]; then
-            backup_retention_0_nowarn_flag=$false
+        if [[ ! $retention =~ $retention_0_days_nowarn_re ]]; then
+            retention_0_nowarn_flag=$false
         else
-            backup_retention=0
-            backup_retention_0_nowarn_flag=$true
+            retention=0
+            retention_0_nowarn_flag=$true
         fi
     fi
 

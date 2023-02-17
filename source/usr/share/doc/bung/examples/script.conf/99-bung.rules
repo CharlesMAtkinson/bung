@@ -1,39 +1,17 @@
-# Sample udev rules file for bung
+# Seagate BUP BK (4 TB USB3)
+KERNEL=="sd*", ACTION=="add", ATTR{size}=="7814033408", ATTRS{serial}=="<redacted>", SYMLINK+="hotplug", RUN+="/usr/bin/hotplug_bu_launcher /usr/bin/hotplug_bu -c hotplug -u"
+KERNEL=="sd*", ACTION=="change", ATTR{size}=="7814033408", ATTRS{serial}=="<redacted>", SYMLINK+="hotplug" 
 
-# There are detailed instructions about creating and debugging a udev rules file
-# for bung in the "Backup scripts next generation - User Guide" document.
+# Seagate BUP Portable (5TB USB3)
+KERNEL=="sd*", ACTION=="add", ATTR{size}=="9767538688", ATTRS{serial}=="<redacted>", SYMLINK+="hotplug", RUN+="/usr/bin/hotplug_bu_launcher /usr/bin/hotplug_bu -c hotplug -u"
+KERNEL=="sd*", ACTION=="change", ATTR{size}=="9767538688", ATTRS{serial}=="<redacted>", SYMLINK+="hotplug" 
 
-# Briefly:
-#   * After customisation, this file can be saved as
-#         /etc/udev/rules.d/99-bung.rules
-#     and loaded either by rebooting or by running 
-#         udevadm control --reload
-#   * For each hot pluggable device that you want bung to backup to, two rules
-#     are needed: an ACTION=="add" rule and a ACTION=="change" rule.  Apart from
-#     the ACTION, the only difference between them is that the ACTION=="add"
-#     rule has RUN+=.
-#   * The rules in this sample are suitable for most hotplug devices.  Some
-#     hotplug devices need a different set of attributes to uniquely identify
-#     them.
-#   * To customise this sample:
-#     > Ensure the hotplug device contains an ext3, ext4 or JFS file system for
-#       use by bung.
-#     > Ensure the hotplug device is plugged in.
-#     > Run the blkid command and identify the block device containing the 
-#       file system for use by bung.  It is /dev/sde1 in the examples below.
-#     > Run the udevadm command to list the attributes of the hotplug device and
-#       the parent devices it is connected by.  For example:
-#           udevadm info --attribute-walk --path=/sys/block/sde/sde1
-#     > Assuming the hotplug device itself (the first section, with ATTR{...}==
-#       attributes) has an ATTR{size} and one of the parent devices (later
-#       sections with ATTRS{...}== attributes) has an ATTRS{serial}, then replace
-#       %size% and %serial% (each twice) with values displayed by udevadm.
-#     > Replace %symlink% (twice) with your choice of name for the
-#       /dev/<symlink> which bung will use to mount the file system, for example
-#       my_hotplug
-#     > Replace the %config% with your choice of name for the hotplug_bu
-#       configuration file.  For example if the file is /etc/bung/foo then
-#       replace the %config% with foo.
+# Samsung SSD 870 (4TB USB3.1)
+KERNEL=="sd*", ACTION=="add", ATTR{size}=="7814033408", ATTRS{model}=="SSD 870 QVO 4TB " SYMLINK+="hotplug", RUN+="/usr/bin/hotplug_bu_launcher /usr/bin/hotplug_bu -c hotplug -u"
+KERNEL=="sd*", ACTION=="change", ATTR{size}=="7814033408", ATTRS{model}=="SSD 870 QVO 4TB " SYMLINK+="hotplug" 
 
-KERNEL=="sd*", ACTION=="add", ATTR{size}=="%size%", ATTRS{serial}=="%serial%", SYMLINK+="%symlink%", RUN+="/usr/bin/hotplug_bu_launcher /usr/bin/hotplug_bu -c %config% -u"
-KERNEL=="sd*", ACTION=="change", ATTR{size}=="%size%", ATTRS{serial}=="%serial%", SYMLINK+="%symlink%"
+# OnePlus 6T
+SUBSYSTEM=="usb", ACTION=="add", ATTR{serial}=="<redacted>", RUN+="systemctl start bung@oneplus6t.service"
+
+# Pixel 5a
+SUBSYSTEM=="usb", ACTION=="add", ATTR{serial}=="<redacted>", RUN+="systemctl start bung@pixel5a.service"

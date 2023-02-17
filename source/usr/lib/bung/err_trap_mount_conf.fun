@@ -1,4 +1,4 @@
-# Copyright (C) 2018 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -99,6 +99,14 @@ function err_trap_mount_conf {
     if [[ $emsg = '' ]]; then
         my_rc=0
         emsg=$initial_emsg
+        if [[ $debugging_flag ]]; then
+            for ((i=0;i<=mount_idx;i++))
+            do
+                msg D "\${mount_fs_spec_conf[$i]}: ${mount_fs_spec_conf[i]}"
+                msg D "\${mount_fs_file[$i]}: ${mount_fs_file[i]}"
+                msg D "\${mount_o_option[$i]}: ${mount_o_option[i]}"
+            done
+        fi
     else
         my_rc=1
         emsg=$initial_emsg$emsg

@@ -1,5 +1,5 @@
 .ig
-Copyright (C) 2022 Charles Atkinson
+Copyright (C) 2023 Charles Michael Atkinson
 
 Permission is granted to make and distribute verbatim copies of this
 manual provided the copyright notice and this permission notice are
@@ -18,7 +18,7 @@ the original English.
 ..
 .\" No adjustment (ragged right)
 .na
-.TH bung-common 5 "11 Nov 2022" "Auroville" "Version 3.2.7"
+.TH bung-common 5 "10 Feb 2023" "Auroville" "Version 3.5.0"
 .SH NAME
 bung \- common configuration for most bung scripts
 .SH SYNOPSIS
@@ -33,26 +33,28 @@ accepted by most of the scripts.
 Each script's specific keywords and a list of which
 keywords it accepts are described in its man 5 page.
 .SH OPTIONS (file format)
-.IP * 4
+.IP \(bu 4
 .nh
 Lines beginning with #, empty lines and lines containing only spaces and tabs are ignored.
 .nh
-.IP * 4
+.IP \(bu 4
 Line syntax is:
 .RS
 .HP
 .nh
 \fBkeyword\~=\~\fR[\fBkey_value\fR\~...] [\fBsub_keyword\fR=\fIsub_key_value\fR\~...]
 .br
+.HP
 or
 .br
+.HP
 \fBkeyword\~=\~[\fBsub_keyword\fR=\fIsub_key_value\fR\~...] \fR[\fBkey_value\fR\~...]
 .RE
-.IP * 4
+.IP \(bu 4
 Key values are position dependent; sub-keywords may be given in any order.
-.IP * 4
+.IP \(bu 4
 When sub_keywords are repeated, the last one's sub_key_value is effective.
-.IP * 4
+.IP \(bu 4
 .nh
 Key and sub-key values may be enclosed in double quotes.
 In case they contain spaces or tabs they must be enclosed in double quotes.
@@ -63,7 +65,7 @@ For example:
 .nh
 Organisation = "Al \\"Scarface\\" Capone"
 .RE
-.IP * 4
+.IP \(bu 4
 .nh
 Outside key and sub-key values:
 .IP "" 4
@@ -79,7 +81,7 @@ User name = sampan type=good class=best
 .HP
 User name=sampan    type = good    class = best
 .RE
-.IP * 4
+.IP \(bu 4
 Keywords are case-insensitive and internal spaces and tabs are ignored.
 .IP "" 4
 For example, these are equivalent:
@@ -95,14 +97,20 @@ Email for report
 .RS
 .nh
 \fBEmail for report = \fIemail_address
-\fR[\fBmsg_level = \fI level\fR]
+\fR[\fBmsg_level = \fIlevel\fR]
 \fR[\fBno_log\fR]
-.P
-Optional; default root with msg_level I (information) and include the log.
 .br
-May appear several times
+or
+.br
+\fBEmail for report = \fBnone\fR
+.P
+Optional; default root with msg_level I (information) and include the log in the email.
+.br
+May appear several times.
 .br
 Ignored when running in subsidiary mode.
+.br
+Ignored when command line option \fB-l\~/dev/tty\fR is used.
 .P
 \fBemail_address\fR is, er, an email address
 .P
@@ -119,6 +127,9 @@ Send the report email only when there is one or more
 error messages.
 .P
 \fBno_log\fR tells bung not to include the log in the report email.
+.P
+\fBnone\fR
+Do not email reports.
 .RE
 .
 .TP
@@ -195,6 +206,55 @@ options=credentials=/etc/bung/foo.credentials
 .RE
 .
 .TP
+Notification plug-in
+.RS
+.nh
+\fBNotification plug-in = \fIexecutable configuration_file
+\fR[\fBmsg_level = \fIlevel\fR]
+\fR[\fBuser = \fIuser\fR]
+\fR[\fBno_log\fR]
+.br
+.P
+Optional; no default
+.br
+May appear several times
+.br
+Ignored when running in subsidiary mode.
+.br
+Ignored when command line option \fB-l\~/dev/tty\fR is used.
+.P
+\fIexecutable\fR is the plug-in executable.
+It must be accessible when $PATH is /usr/local/bin:/usr/sbin:/sbin:/usr/bin:/bin
+.P
+\fIconfiguration_file\fR is the plug-in's configuration file.
+If it does not contain a "/",
+it is relative to the bung configuration directory,
+normally /etc/bung for root and ~/etc/bung for others.
+.br
+For a config file in the current working directory, use ./
+.P
+\fBmsg_level\fR sets the minimum message level at which a notification should be sent.
+.br
+\fBI\fR for information (default).  Always send a notification.
+.br
+\fBW\fR for warning.
+Send a notification only when there is one or more
+warning or error messages.
+.br
+\fBE\fR for error.
+Send a notification only when there is one or more
+error messages.
+.P
+\fBuser\fR the user to run the plug-in
+.br
+Optional; defaults to bung
+.br
+Ignored when not being run by root
+.P
+\fBno_log\fR tells bung not to include the log in the notification.
+.
+.RE
+.TP
 Number of open files
 .RS
 .nh
@@ -218,7 +278,7 @@ Overridden by command line option -o
 .P
 May not contain a "/"
 .P
-Note: the organisation name appears in report emails' subjects so you may like
+Note: the organisation name appears in the subject of report emails and notifications so you may like
 to make it short and meaningful
 .RE
 .
@@ -277,9 +337,7 @@ If the return code from the pre-hook command is:
 .br
 2: bung generates an error message
 .P
-Examples
-.br
-Example hook scripts are normally installed in /usr/share/bung/doc/examples/hook scripts/
+Example hook scripts are normally installed in /usr/share/doc/bung/examples/hook scripts/
 .RE
 .
 .TP
@@ -328,9 +386,7 @@ If the return code from the pre-hook command is:
 .br
 4: bung generates an error message (implies does not continue)
 .P
-Examples
-.br
-Example hook scripts are normally installed in /usr/share/bung/doc/examples/hook scripts/
+Example hook scripts are normally installed in /usr/share/doc/bung/examples/hook scripts/
 .RE
 .
 .TP
@@ -397,7 +453,7 @@ May be used multiple times.
 .br
 If it does not contain a "/",
 it is relative to the bung configuration directory,
-normally /etc/bung.
+normally /etc/bung for root and ~/etc/bung for others.
 .br
 For a config file in the current working directory, use ./
 .P
@@ -421,8 +477,6 @@ More on MM/DD/d/HH/ in the smartd.conf man page under -s
 For example, to match Fridays: schedule=.*/.*/.*/5/.*/.*/.*
 .RE
 .SH ENVIRONMENT
-BUNG_BIN_DIR sets the default bung library directory.  Intended for developers' use.  Default /usr/bin.
-.br
 BUNG_COMPGEN_DIR.  If not unset or empty, writes global variables at start and end of run to
 $BUNG_COMPGEN_DIR/initial.vars and final.vars.  Intended for developers' use.
 .br
@@ -441,9 +495,9 @@ Default /run/bung for root or ~/var/run/bung for others.
 Default directories are listed in the ENVIRONMENT section.
 .SH EXAMPLES
 In addition to the examples given above, example bung configuration files are
-normally installed in /usr/share/bung/doc/examples
+normally installed in /usr/share/doc/bung/examples
 .SH AUTHOR
-Charles Atkinson bung@charlesmatkinson.org
+Charles Michael Atkinson bung@charlesmatkinson.org
 .SH SEE ALSO
 \fBcheck_hotplug_usage\fR(5 and 8),
 \fBbung-common\fR(8),
@@ -459,4 +513,4 @@ Charles Atkinson bung@charlesmatkinson.org
 \fBtemplate_file\fR(5)
 .br
 The bung user guide,
-normally installed in /usr/share/bung/doc
+normally installed in /usr/share/doc/bung

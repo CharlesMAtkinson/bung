@@ -1,4 +1,4 @@
-# Copyright (C) 2013 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -29,6 +29,11 @@
 # Return value: always 0; does not return on error
 #--------------------------
 function postprocess_org_name_conf {
+    # TODO: 
+    #    * Rename as postprocess_organisationname_conf (keywords always in normalised form in names)
+    #    * Move the error traps to err_trap_organisationname_conf
+    #    * Update all callers
+    fct "${FUNCNAME[0]}" 'started'
     local org_name_conf=${1:-}
     local org_name_optarg=${2:-}
     local opt_o_flag=${3:-}
@@ -54,5 +59,7 @@ function postprocess_org_name_conf {
 
     [[ ${org_name:-} = '' ]] \
         && msg E "Programming error: function ${FUNCNAME[0]}: no org_name set.  \$1: ${1:-}, \$2: ${2:-}, \$3: ${3:-}"
+
+    fct "${FUNCNAME[0]}" 'returning'
 }  # End of function postprocess_org_name_conf
 # vim: filetype=bash:

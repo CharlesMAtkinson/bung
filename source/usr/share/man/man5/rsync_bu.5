@@ -1,5 +1,5 @@
 .ig
-Copyright (C) 2022 Charles Atkinson
+Copyright (C) 2023 Charles Michael Atkinson
 
 Permission is granted to make and distribute verbatim copies of this
 manual provided the copyright notice and this permission notice are
@@ -18,7 +18,7 @@ the original English.
 ..
 .\" No adjustment (ragged right)
 .na
-.TH rsync 5 "11 Nov 2022" "Auroville" "Version 3.2.7"
+.TH rsync 5 "10 Feb 2023" "Auroville" "Version 3.5.0"
 .SH NAME
 rsync_bu \- configuration for bung's rsync wrapper
 .SH SYNOPSIS
@@ -35,7 +35,13 @@ rsync_bu \- configuration for bung's rsync wrapper
 .HP
 \fBPost-hook\fB\~=\~\fI...
 .HP
-\fBrsync\~= SRC DEST \fR[\fBbackup_dir=\fIDIR\fR] \fR[\fB--bwlimit=\fIlimit\fR] \fR[\fBdest_dir_usage_warning=\fI%\fR] \fR[\fBdest_dir_windows\fR] \fR[\fB--exclude-from=\fIFILE\fR] \fR[\fBnocompression\fR] \fR[\fBno-numeric-ids\fR] \fR[\fBremote_host_timeout=\fIminutes,minutes\fR] \fR[\fBretention=\fIdays\fR[,\fBnowarn\fR]] \fR[\fBretry=\fIcount\fR] [\fB--timeout=\fISECONDS\fR] [\fBverbose=\fIlevel\fR] 
+\fBrsync\~= \fISRC\fR \fIDEST\fR [\fBbackup_dir=\fIDIR\fR] \fR[\fB--bwlimit=\fIlimit\fR] \fR[\fBdest_dir_usage_warning=\fI%\fR] 
+.br
+\fR[\fBdest_dir_windows\fR] \fR[\fB--exclude-from=\fIFILE\fR] \fR[\fBnocompression\fR] \fR[\fBno-numeric-ids\fR] \fR[\fBremote_host_timeout=\fIminutes,minutes\fR] 
+.br
+\fR[\fBretention=\fInumber\fR[\fBdays\fR]]|\fR[\fBretention=\fB0\fR[\fBdays\fR][,\fBnowarn\fR]]|\fInumber\fBpercent_usage\fR[\fB,\fInumber\fBmin_old_backups\fR]|\fInumber\fBold_backups] 
+.br
+\fR[\fBretry=\fIcount\fR] [\fB--timeout=\fISECONDS\fR] [\fBverbose=\fIlevel\fR] 
 .HP
 or
 .HP
@@ -47,34 +53,36 @@ or
 .HP
 .nh
 .SH DESCRIPTION
-This page describes the keywords specific to rsync_bu
+This page describes the keywords specific to rsync_bu.
 .P
 The \fBbung-common\fR (5) man page describes
 the configuration file format
-and the common keywords ellipsised in the \fBSYNOPSIS\fR above
-.SH OPTIONS (keywords)
-.TP
-rsync
-.RS
-.HP
+and the common keywords ellipsised in the \fBSYNOPSIS\fR above.
+.SH OPTIONS (key values and sub-keywords)
+.P
 .nh
-\fBrsync\~= SRC DEST \fR[\fBbackup_dir=\fIDIR\fR] \fR[\fB--bwlimit=\fIlimit\fR] \fR[\fBdest_dir_usage_warning=\fI%\fR] \fR[\fBdest_dir_windows\fR] \fR[\fB--exclude-from=\fIFILE\fR] \fR[\fBnocompression\fR] \fR[\fBno-numeric-ids\fR] \fR[\fBretention=\fIdays\fR[,\fBnowarn\fR]] \fR[\fBremote_host_timeout=\fIduration\fR] \fR[\fBretry=\fIcount\fR] [\fB--timeout=\fISECONDS\fR] [\fBverbose=\fIlevel\fR] 
-.HP
-or
-.HP
-\fBrsync\~= SRC DEST \fR[\fBoptions=\fIoptions\fR] [\fBdest_dir_usage_warning=\fI%\fR] \fR[\fBretry=\fIcount\fR]
 .P
-Required
+\fISRC\fR is the source directory as described on the rsync man page.
 .P
-\fBSRC\fR is the source directory as described on the rsync man page.
+When \fISRC\fR begins with [USER@]HOST:,
+HOST is resolved according to ssh procedure
+which usually means it is an entry in ~/.ssh/config
+which normally also names the private key to use.
+The corresponding public key must be in the remote host's
+user's ~/.ssh/authorized_keys or authorized_keys2 file.
 .P
-\fBDEST\fR is the destination directory as described on the rsync man page.
+The local ~/.ssh/known_hosts must have an entry for the remote host.
+If it does not, ssh will prompt interactively which will hang rsync_bu.
+When setting up such a job,
+use the paswordless logon interactively once
+to add the remote host to the local ~/.ssh/known_hosts.
 .P
-\fB--bwlimit\fR
-sets rsync's --bwlimit option.
-.br
-Further information on the rsync man page in the --bwlimit section.
+\fIDEST\fR is the destination directory as described on the rsync man page.
 .P
+When \fIDEST\fR begins with [USER@]HOST:,
+the ssh notes for \fISRC\fR above apply.
+.P
+rsync_bu does not support both \fISRC\fR and \fIDEST\fR on ssh hosts.
 .P
 \fBbackup_dir\fR
 is used to override bung's default "_Changed and deleted files" backup
@@ -85,6 +93,11 @@ sub-directory, as when backing up a backup.
 Further information on the rsync man page in the --backup-dir section.
 .br
 Default: "_Changed and deleted files"
+.P
+\fB--bwlimit\fR
+sets rsync's --bwlimit option.
+.br
+Further information on the rsync man page in the --bwlimit section.
 .P
 \fBdest_dir_usage_warning\fR is the % file system usage that will trigger a
 warning after the backup is finished.
@@ -117,7 +130,7 @@ Do not use rsync's --numeric-ids option
 .br
 It is useful when using rsync_bu to sync files to a destination system
 which has the same groups and users by name but different by number
-and the files may be used on the destination system.i
+and the files may be used on the destination system.
 .br
 bung's default is --numeric-ids because it works best when restoring files
 from the destination system.
@@ -142,17 +155,57 @@ d for days.
 .br
 Default 10m
 .P
-\fBretention\fR
-specifies the number of days that rsync backup files are kept.
+\fBretention=\fI...\fR
 .br
-If retention=0 is used and the destination directory has a
-"_Changed and deleted files" sub-directory, a warning will be generated.
-The warning can be disabled by using retention=0,nowarn.
+Specifies changed and deleted files retention.
+.P
+During backup, changed and deleted files are moved to a
+\fIYYYY\fB/\fIMmm\fB/\fIhh:mm\fR subdirectory
+of \fIDEST\fR/"_Changed and deleted files"
+or as "_Changed and deleted files" has been changed by \fBbackup_dir=\fIDIR\fR.
+\fBretention=\fR specifies how these subdirectories are removed.
+.P
+Default: 28 day retention.
 .br
-Default: 28
+.RS
+.P
+\fBretention=\fInumber\fR[\fBdays\fR]
+.br
+Specifies the number of days that these subdirectories are kept.
+.P
+\fBretention=0\fR[\fBdays\fR][,\fBnowarn\fR]
+.br
+Specifies no removal of changed and deleted files.
+.P
+If \fIDEST\fR/"_Changed and deleted files" exists
+(or as "_Changed and deleted files" has been changed by \fBbackup_dir=\fIDIR\fR)
+a warning will be generated.
+The warning can be disabled by using \fBretention=0,nowarn\fR.
+.P
+\fInumber\fBpercent_usage\fR[\fB,\fInumber\fBmin_old_backups\fR]
+.RS
+\fInumber\fBpercent_usage\fR
+.br
+Specifies repeatedly removing the oldest changed and deleted file subdirectory until the file system usage is \fInumber\fR percent or less.
+.P
+When more than one backup is written to the same file system,
+this can result in all the changed and deleted files subdirectories for this backup
+being removed before the specified % file system usage is achieved
+because of space used by another backup.
+.P
+\fInumber\fBpercent_usage\fR\fB,\fInumber\fBmin_old_backups\fR
+.br
+Works like \fInumber\fBpercent_usage\fR except the most recent
+\fInumber\fBmin_old_backups\fR are not removed.
+.RE
+.P
+\fBretention=\fInumber\fBold_backups\fR 
+.br
+Specifies removing all but the most recent \fInumber\fR changed and deleted file subdirectories.
+.RE
 .P
 \fBretry\fR
-specifies the number of times the rsync command is retried on timeout
+Specifies the number of times the rsync command is retried on timeout.
 .br
 Default: 2
 .P
@@ -165,22 +218,6 @@ except rsync_bu defaults to --timeout=600.
 Valid range: 0 to 3
 .br
 Default: 1
-.P
-\fBNote about remote SRC or DEST\fR
-.br
-When SRC or DEST begin with begin with [USER@]HOST:,
-HOST is resolved according to ssh procedure
-which usually means it is an entry in /root/.ssh/config
-which normally also names the private key to use.
-The corresponding public key must be in the remote host's
-user's /root/.ssh/authorized_keys or authorized_keys2 file.
-The local /root/.ssh/known_hosts must have an entry for the remote host.
-If it does not, ssh will prompt interactively.
-When rsync is being run by rsync_bu,
-rsync_bu will hang until interaction is completed.
-When setting up such a job,
-use the paswordless logon interactively once
-to add the remote host to the local /root/.ssh/known_hosts.
 .RE
 .
 .SH ENVIRONMENT
@@ -189,12 +226,12 @@ Environment variables are described in bung-common (5).
 Default directories are described in bung-common (5).
 .SH EXAMPLES
 Example rsync_bu configuration files are
-normally installed in /usr/share/bung/doc/examples
+normally installed in /usr/share/doc/bung/examples
 .SH AUTHOR
-Charles Atkinson bung@charlesmatkinson.org
+Charles Michael Atkinson bung@charlesmatkinson.org
 .SH SEE ALSO
 \fBbung-common\fR(5 and 8),
 \fBrsync_bu\fR(8)
 .br
 The bung user guide,
-normally installed in /usr/share/bung/doc
+normally installed in /usr/share/doc/bung

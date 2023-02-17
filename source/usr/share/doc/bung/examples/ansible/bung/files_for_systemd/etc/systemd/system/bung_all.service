@@ -1,0 +1,9 @@
+[Unit]
+Description=bung super_bu.sh all job
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/super_bu -c all
+User=root
+Group=root
+Slice=bung_all.slice

@@ -1,6 +1,6 @@
 #! /bin/bash
 
-# Copyright (C) 2021 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -94,6 +94,8 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 #    +-- run_subsidiary_scripts
 #    |
 #    +-- finalise
+#        |
+#        +-- functions as documented in finalise.fun
 #
 # Utility functions called from various places:
 #     ck_file ck_uint err_trap_uint fct msg
@@ -109,6 +111,7 @@ source "$BUNG_LIB_DIR/do_snapshots.fun" || exit 1
 source "$BUNG_LIB_DIR/do_umounts.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_email_for_report.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_mount_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_notification_plug_in_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_post_hook_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_pre_hook_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_shutdown.fun" || exit 1
@@ -139,14 +142,14 @@ function initialise {
 
     # Parse configuration file
     # ~~~~~~~~~~~~~~~~~~~~~~~~
-    emsg=
     # Note: ensure a space on both sides of each string in the arrays
     local -A keyword_validation
-    keyword_validation[name]=' 
+    keyword_validation[name]='
         emailforreport 
         logretention 
         maxmemorysize 
         mount 
+        notificationplug_in 
         numberofopenfiles
         organisationname 
         post_hook 
@@ -155,7 +158,7 @@ function initialise {
         snapshot 
         subsidiaryscript 
     '
-    keyword_validation[repeat invalid]=' 
+    keyword_validation[repeat_invalid]=' 
         logretention 
         maxmemorysize 
         numberofopenfiles
@@ -192,6 +195,9 @@ function initialise {
     # Mount
     postprocess_mount_conf && err_trap_mount_conf
 
+    # Notification plug-in
+    err_trap_notification_plug_in_conf
+
     # Organisation name
     postprocess_org_name_conf "${org_name:-}" "${org_name_optarg:-}" "$opt_o_flag"
 
@@ -210,6 +216,7 @@ function initialise {
     # Subsidiary script
     err_trap_subsidiary_script_conf
 
+    [[ $wmsg != '' ]] && msg W "Error(s) in configuration file $conf_fn:$wmsg"
     [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
 
     # Finish if -C option (check the configuration)
@@ -229,7 +236,7 @@ function initialise {
 }  # end of function initialise
 
 source "$BUNG_LIB_DIR/msg.fun" || exit 1
-source "$BUNG_LIB_DIR/my_cat.fun" || exit 1
+source "$BUNG_LIB_DIR/my_mailx.fun" || exit 1
 source "$BUNG_LIB_DIR/parse_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/parse_conf_subsidiaryscript.fun" || exit 1
 source "$BUNG_LIB_DIR/parse_conf_word.fun" || exit 1
@@ -237,6 +244,7 @@ source "$BUNG_LIB_DIR/postprocess_email_for_report.fun" || exit 1
 source "$BUNG_LIB_DIR/postprocess_mount_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/postprocess_org_name_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/postprocess_snapshot_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/run_notification_plug_in.fun" || exit 1
 source "$BUNG_LIB_DIR/run_pre_hooks.fun" || exit 1
 source "$BUNG_LIB_DIR/run_subsidiary_scripts.fun" || exit 1
 source "$BUNG_LIB_DIR/usage.fun" || exit 1

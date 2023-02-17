@@ -30,7 +30,7 @@ function set_traps {
     local time_now time_regex
 
     if [[ $1 = finalise ]]; then
-        msg I 'Setting traps to call finalise'
+        msg D 'Setting traps to call finalise'
         for ((i=1;i<${#sig_names[*]};i++))
         do  
             ((i==9)) && continue     # SIGKILL
@@ -38,7 +38,7 @@ function set_traps {
             trap "finalise $((128+i))" ${sig_names[i]#SIG}
         done
     elif [[ $1 = signal_num_received ]]; then
-        msg I 'Setting traps to set signal_num_received'
+        msg D 'Setting traps to set signal_num_received'
         for ((i=1;i<${#sig_names[*]};i++))
         do  
             ((i==9)) && continue     # SIGKILL

@@ -1,4 +1,4 @@
-# Copyright (C) 2022 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,18 +18,18 @@
 #   * parse_conf: entry to parsing
 #   * parse_conf_email_for_report: parse common keyword "Email for report"
 #   * parse_conf_mount: parse common keyword "Mount"
+#   * parse_conf_notification_plug_in: parse common keyword "Notification plug-in"
 #   * parse_conf_post_hook: parse common keyword "Post-hook"
 #   * parse_conf_pre_hook: parse common keyword "Pre-hook"
 #   * parse_conf_snapshot: parse common keyword "Snapshot"
 #   * parse_conf_subkey_value: utility function to parse a subkey value
 
 # Programmer's notes
-#   * Please keep the size of this file minimal:
-#     > Only common configuration file parsing functions are defined in this file
-#     > In case configuration file parsing functions are used by a single
-#       script, define them in that script's file.
-#     > In case configuration file parsing functions are used by a few
-#       scripts, define them in a separate lib/*.fun file
+#   * Only common configuration file parsing functions are defined in this file
+#   * In case configuration file parsing functions are used by a single
+#     script, define them in that script
+#   * In case configuration file parsing functions are used by a few
+#     scripts, define them in a separate lib/parse_conf_*.fun file
 
 #--------------------------
 # Name: parse_conf
@@ -42,7 +42,8 @@
 #       keyword_validation[]
 #       true and false
 #   Set:
-#       emsg: appends any error messages
+#       emsg: creates and appends any error messages
+#       wmsg: creates and appends any error messages
 #       keyword_validation[]
 # Output: none
 # Return value:
@@ -89,11 +90,12 @@ function parse_conf {
     # space-separated list with single spaces at beginning and end.
     # This allows callers to create the strings in a conveniently legible way.
     keyword_validation[name]=" $(echo ${keyword_validation[name]}) "
-    keyword_validation[repeat invalid]=" $(echo ${keyword_validation[repeat invalid]}) "
+    keyword_validation[repeat_invalid]=" $(echo ${keyword_validation[repeat_invalid]}) "
 
     # Error traps
     # ~~~~~~~~~~~
-    emsg=${emsg:-}                                   # Ensure set
+    emsg=
+    wmsg=
     if [[ -h /proc/$$/fd/3 ]]; then
         emsg+=$msg_lf"Programming error: ${FUNCNAME[0]} called with fd 3 already in use"
         return 1
@@ -136,7 +138,7 @@ function parse_conf {
 
         # Error trap invalidly repeated keywords
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        if [[ ${keyword_validation[repeat invalid]} =~ $regex ]]; then
+        if [[ ${keyword_validation[repeat_invalid]} =~ $regex ]]; then
             if [[ ! ${keyword_seen[$keyword_norm]:-} ]]; then
                 keyword_seen[$keyword_norm]=$true
             else
@@ -149,7 +151,7 @@ function parse_conf {
         # TODO: change all these to call a parse_conf_$keyword_norm function?
         case "$keyword_norm" in
             checkhotplugusage )
-                parse_conf_ck_hotplug_usage "$keyword" "$value" "$line_n"
+                parse_conf_checkhotplugusage "$keyword" "$value" "$line_n"
                 ;;
             dg_gs1526e )
                 parse_conf_DG_GS1526E "$keyword" "$value" "$line_n"
@@ -171,6 +173,9 @@ function parse_conf {
                 ;;
             mysql )
                 parse_conf_mysql "$keyword" "$value" "$line_n"
+                ;;
+            notificationplug_in )
+                parse_conf_notification_plug_in "$keyword" "$value" "$line_n"
                 ;;
             numberofopenfiles )
                 n_open_files=$value
@@ -283,7 +288,7 @@ function parse_conf_email_for_report {
         idx=$((++email_for_report_idx))
         email_for_report[idx]=$email
         email_for_report_msg_level[idx]=I
-        email_for_report_nolog_flag[idx]=$false
+        email_for_report_no_log_flag[idx]=$false
 
         # Parse any subkeywords
         # ~~~~~~~~~~~~~~~~~~~~~
@@ -298,7 +303,7 @@ function parse_conf_email_for_report {
         done
 
         [[ ${parsed_word,,} = no_log ]] \
-            && email_for_report_nolog_flag[idx]=$true
+            && email_for_report_no_log_flag[idx]=$true
     else
         pc_emsg+=$msg_lf"Email for report value missing on line $line_n"
     fi
@@ -405,6 +410,95 @@ function parse_conf_mount {
     fct "${FUNCNAME[0]}" "returning with rc $my_rc"
     return $my_rc
 }  # end of function parse_conf_mount
+
+#--------------------------
+# Name: parse_conf_notification_plug_in
+# Purpose:
+#   Parses an "Notification plug-in report" line from the configuration file
+# Arguments:
+#   $1 - the "Notification plug-in report" keyword as read from the configuration file (not normalised)
+#   $2 - the "Notification plug-in report" value from the configuration file
+#   $3 - the configuration file line number
+# Global variable usage:
+#   Read:
+#       true and false
+#   Set:
+#       notification_plug_in_idx incremented
+#       pc_emsg appended with any error message
+#       unparsed_str
+# Output: none except via function fct
+# Return value:
+#   0 when no error detected
+#   1 when an error is detected
+#--------------------------
+function parse_conf_notification_plug_in {
+    fct "${FUNCNAME[0]}" "started with keyword: ${1:-}, value: ${2:-}, line_n: ${3:-}"
+    local buf conffile executable no_log idx rc unparsed_str
+
+    # Parse arguments
+    # ~~~~~~~~~~~~~~~
+    if [[ ${3:-} = '' ]]; then
+        msg="Programmming error: ${FUNCNAME[0]} called with less than 3 arguments"
+        msg E "$msg (args: $*)"
+    fi
+    local -r keyword=$1
+    local -r value=$2
+    local -r line_n=$3
+
+    # Initialise
+    # ~~~~~~~~~~
+    local -r initial_pc_emsg=$pc_emsg
+    unparsed_str=$value
+
+    # Parse the value
+    # ~~~~~~~~~~~~~~~
+    # The value format/syntax is:
+    # Email for report = executable conffile [msg_level=I|W|E] [no_log]
+
+    parse_conf_word $line_n
+    if (($?!=0)); then
+        fct "${FUNCNAME[0]}" 'returning 1'
+        return 1
+    fi
+    executable=$parsed_word
+    parse_conf_word $line_n
+    if (($?!=0)); then
+        fct "${FUNCNAME[0]}" 'returning 1'
+        return 1
+    fi
+    conffile=$parsed_word
+
+    if [[ $conffile != '' ]]; then
+        idx=$((++notification_plug_in_idx))
+        notification_plug_in_executable[idx]=$executable
+        notification_plug_in_conffile[idx]=$conffile
+        notification_plug_in_conf_err_flag[idx]=$false
+        notification_plug_in_msg_level[idx]=I
+        notification_plug_in_no_log_flag[idx]=$false
+        notification_plug_in_user[idx]=bung
+
+        # Parse any subkeywords
+        # ~~~~~~~~~~~~~~~~~~~~~
+        local -A subkey_validation
+        subkey_validation[name]=' msg_level no_log user '
+        subkey_validation[value_required]=' msg_level user '
+        subkey_validation[value_invalid]=' no_log '
+        local +r subkey_validation
+        while [[ $unparsed_str != '' ]]
+        do
+            parse_conf_subkey_value "${FUNCNAME[0]}" $line_n
+        done
+
+        [[ ${parsed_word,,} = no_log ]] \
+            && notification_plug_in__nolog_flag[idx]=$true
+    else
+        pc_emsg+=$msg_lf"Notification plug-in keyword value(s) missing on line $line_n"
+    fi
+
+    [[ $pc_emsg = $initial_pc_emsg ]] && my_rc=0 || my_rc=1
+    fct "${FUNCNAME[0]}" "returning with rc $my_rc"
+    return $my_rc
+}  # end of function parse_conf_notification_plug_in
 
 #--------------------------
 # Name: parse_conf_post_hook
@@ -773,32 +867,19 @@ function parse_conf_subkey_value {
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Cannot do this for parse_conf_snapshot because it uses both snapshot_idx
     # and mount_idx
-    # TODO: same for ck_hotplug_usage_idx, email_for_report_idx,
-    #     hotplug_dev_idx and subsidiaryscript_idx
+    # TODO: same for email_for_report_idx and subsidiaryscript_idx?
     case $caller in
         parse_conf_mount )
             idx=$mount_idx
             ;;
-        parse_conf_mysql )
-            idx=$mysql_idx
-            ;;
-        parse_conf_openldap )
-            idx=$openldap_idx
+        parse_conf_notification_plug_in )
+            idx=$notification_plug_in_idx
             ;;
         parse_conf_post_hook )
             idx=$post_hook_idx
             ;;
         parse_conf_pre_hook )
             idx=$pre_hook_idx
-            ;;
-        parse_conf_postgresql )
-            idx=$pg_idx
-            ;;
-        parse_conf_rsync )
-            idx=0
-            ;;
-        parse_conf_sysinfo )
-            idx=$sysinfo_idx
     esac
 
     # Assign sub-keyword value to a variable
@@ -817,43 +898,34 @@ function parse_conf_subkey_value {
             rsync_backup_dir=$subkey_val
             ;;
         compression )
-            mysql_compression[idx]=$subkey_val
+            compression=$subkey_val
             ;;
         debug )
             subsidiaryscript_debug[subsidiaryscript_idx]=$true
             ;;
         defaults_file )
-            mysql_defaults_fn[idx]=$subkey_val
+            defaults_fn=$subkey_val
             ;;
         dest_dir )
-            if [[ $caller = parse_conf_templated ]]; then
-               dest_dir=$subkey_val
-            else
-               dest_dirs[idx]=$subkey_val
-            fi
+            dest_dir=$subkey_val
             ;;
         dest_dir_usage_warning )
-            if [[ $caller = parse_conf_rsync ]]; then
-               dest_dir_usage_warning=$subkey_val
-            else
-               dest_dir_usage_warnings[idx]=$subkey_val
-            fi
+            dest_dir_usage_warning=$subkey_val
             ;;
         dest_dir_windows )
-            dest_dir_windows_flag[idx]=$true
+            dest_dir_windows_flag=$true
             ;;
         device_type )
             device_type=$subkey_val
             ;;
         email )
-            ck_hotplug_usage_email[ck_hotplug_usage_idx]+=,$subkey_val
+            ck_hotplug_usage_email+=,$subkey_val
             ;;
         email_wait )
-            hotplug_dev_note_email_wait[hotplug_dev_idx]=$subkey_val
+            hotplug_dev_note_email_wait=$subkey_val
             ;;
         exclude )
-            [[ $caller = parse_conf_mysql ]] && mysql_exclude[idx]=$subkey_val
-            [[ $caller = parse_conf_postgresql ]] && pg_exclude[idx]=$subkey_val
+            exclude=$subkey_val
             ;;
         git_root )
             git_root_dir=$subkey_val
@@ -874,20 +946,17 @@ function parse_conf_subkey_value {
             subsidiaryscript_ionice[subsidiaryscript_idx]=$subkey_val
             ;;
         maxbackupage )
-            [[ ${ck_hotplug_usage_max_backup_age[ck_hotplug_usage_idx]} != '' ]] \
-                && pc_emsg+=$msg_lf"line $line_n: $subkey is repeated"
-            ck_hotplug_usage_max_backup_age[ck_hotplug_usage_idx]=$subkey_val
+            ck_hotplug_usage_max_backup_age=$subkey_val
             ;;
         maxdevicechangedays )
-            [[ ${ck_hotplug_usage_max_device_change_days[ck_hotplug_usage_idx]} != '' ]] \
-                && pc_emsg+=$msg_lf"line $line_n: $subkey is repeated"
-            ck_hotplug_usage_max_device_change_days[ck_hotplug_usage_idx]=$subkey_val
+            ck_hotplug_usage_max_device_change_days=$subkey_val
             ;;
         msg_level )
-            email_for_report_msg_level[email_for_report_idx]=$subkey_val
+            [[ $caller = parse_conf_email_for_report ]] && email_for_report_msg_level[idx]=$subkey_val
+            [[ $caller = parse_conf_notification_plug_in ]] && notification_plug_in_msg_level[idx]=$subkey_val
             ;;
         missing_device_message_class )
-            hotplug_dev_missing_msgclass[hotplug_dev_idx]=$subkey_val
+            hotplug_dev_missing_msgclass=$subkey_val
             ;;
         nice )
             subsidiaryscript_nice[subsidiaryscript_idx]=$subkey_val
@@ -896,7 +965,8 @@ function parse_conf_subkey_value {
             mount_fsck[idx]=$false
             ;;
         no_log )
-            email_for_report_nolog_flag[email_for_report_idx]=$true
+            [[ $caller = parse_conf_email_for_report ]] && email_for_report_no_log_flag[idx]=$true
+            [[ $caller = parse_conf_notification_plug_in ]] && notification_plug_in_no_log_flag[idx]=$true
             ;;
         nocompression )
             rsync_nocompression_flag=$true
@@ -905,40 +975,40 @@ function parse_conf_subkey_value {
             rsync_no_numeric_ids_flag=$true
             ;;
         notification_email )
-            hotplug_dev_note_email[hotplug_dev_idx]=$subkey_val
+            hotplug_dev_note_email=$subkey_val
             ;;
         notification_screen )
-            hotplug_dev_note_screen_flag[hotplug_dev_idx]=$true
+            hotplug_dev_note_screen_flag=$true
             ;;
         options )
             [[ $caller = parse_conf_mount ]] && mount_o_option[idx]=$subkey_val
             [[ $caller = parse_conf_rsync ]] && rsync_options=$subkey_val
             ;;
         organisation )
-            ck_hotplug_usage_org[ck_hotplug_usage_idx]=$subkey_val
+            ck_hotplug_usage_org=$subkey_val
             ;;
         password )
-            [[ $caller = parse_conf_templated ]] && password=$subkey_val
-            [[ $caller = parse_conf_DG_GS1526E ]] && passwd[my_conf_idx]=$subkey_val
+            password=$subkey_val
             ;;
         remote_host_log_dir )
-            remote_host_log_dir[idx]=$subkey_val
+            remote_host_log_dir=$subkey_val
             ;;
         remote_host_pid_dir )
-            remote_host_pid_dir[idx]=$subkey_val
+            remote_host_pid_dir=$subkey_val
             ;;
         remote_host_timeout )
-            remote_host_timeout[idx]=$subkey_val
+            remote_host_timeout=$subkey_val
             ;;
         retention )
-            backup_retention[idx]=$subkey_val
+            retention=$subkey_val
             ;;
         retry )
-            retry_max[idx]=$subkey_val
+            retry_max=$subkey_val
             ;;
         run )
             case $caller in
                 parse_conf_post_hook ) post_hook_run=$subkey_val ;;
+                * ) msg E "Programming error: ${FUNCNAME[0]}: $LINENO: unsupported caller $caller" ;;
             esac
             ;;
         schedule )
@@ -946,9 +1016,6 @@ function parse_conf_subkey_value {
             ;;
         size )
             snapshot_size[snapshot_idx]=$subkey_val
-            ;;
-        switch_ip )
-            switch_ip[my_conf_idx]=$subkey_val
             ;;
         template )
             template_fn=$subkey_val
@@ -959,29 +1026,26 @@ function parse_conf_subkey_value {
         tftp_server )
             tftp_server=$subkey_val
             ;;
-        tftp_server_ip )
-            tftp_server_ip[my_conf_idx]=$subkey_val
-            ;;
         timeout )
             case $caller in
                 parse_conf_post_hook ) post_hook_timeout[idx]=$subkey_val ;;
                 parse_conf_pre_hook ) pre_hook_timeout[idx]=$subkey_val ;;
                 parse_conf_templated ) templated_timeout=$subkey_val ;;
-                * ) timeout[my_conf_idx]=$subkey_val ;;
+                * ) msg E "Programming error: ${FUNCNAME[0]}: $LINENO: unsupported caller $caller" ;;
             esac
             ;;
         timeout_msgclass )
             case $caller in
                 parse_conf_post_hook ) post_hook_timeout_msgclass[idx]=$subkey_val ;;
                 parse_conf_pre_hook ) pre_hook_timeout_msgclass[idx]=$subkey_val ;;
+                * ) msg E "Programming error: ${FUNCNAME[0]}: $LINENO: unsupported caller $caller" ;;
             esac
             ;;
         timestamp_format )
-            [[ $caller = parse_conf_msql ]] && mysql_timestamp_format[idx]=$subkey_val
-            [[ $caller = parse_conf_postgresql ]] && pg_timestamp_format[idx]=$subkey_val
+            timestamp_format=$subkey_val
             ;;
         user )
-            user[my_conf_idx]=$subkey_val
+            notification_plug_in_user[idx]=$subkey_val
             ;;
         username )
             username=$subkey_val

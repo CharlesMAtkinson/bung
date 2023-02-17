@@ -1,6 +1,6 @@
 #! /bin/bash
 
-# Copyright (C) 2021 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -56,6 +56,8 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 #    |   +-- postprocess_templated_conf
 #    |   |
 #    |   +-- err_trap_templated_conf
+#    |   |   |
+#    |   |   +-- err_trap_retention
 #    |   |
 #    |   +-- err_trap_shutdown
 #    |   |
@@ -72,6 +74,8 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 #    |   +-- get_fs_type
 #    |   |
 #    |   +-- do_mount_command
+#    |
+#    +-- remove_old_backups
 #    |
 #    +-- run_template
 #    |   |
@@ -90,6 +94,8 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 #    +-- report_dest_dir_usage
 #    |
 #    +-- finalise
+#        |
+#        +-- functions as documented in finalise.fun
 #
 # Utility functions called from various places:
 #     ck_file ck_uint do_umounts err_trap_uint fct msg
@@ -210,11 +216,13 @@ source "$BUNG_LIB_DIR/do_snapshots.fun" || exit 1
 source "$BUNG_LIB_DIR/do_umounts.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_email_for_report.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_mount_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_notification_plug_in_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_post_hook_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_pre_hook_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_templated_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_shutdown.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_snapshot_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_retention_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_uint.fun" || exit 1
 source "$BUNG_LIB_DIR/fct.fun" || exit 1
 source "$BUNG_LIB_DIR/finalise.fun" || exit 1
@@ -243,13 +251,13 @@ function initialise {
 
     # Parse configuration file
     # ~~~~~~~~~~~~~~~~~~~~~~~~
-    emsg=
     # Note: ensure a space on both sides of each string in the arrays
     local -A keyword_validation
     keyword_validation[name]='
         emailforreport 
         logretention 
         mount 
+        notificationplug_in 
         organisationname 
         post_hook 
         pre_hook 
@@ -257,7 +265,7 @@ function initialise {
         snapshot 
         templated 
     '
-    keyword_validation[repeat invalid]='
+    keyword_validation[repeat_invalid]='
         logretention 
         organisationname 
         post_hook 
@@ -266,7 +274,9 @@ function initialise {
         templated 
 '
     local +r keyword_validation
+    templated_keyword_found_flag=$false
     parse_conf "$conf_fn"
+    [[ ! $templated_keyword_found_flag ]] && emsg+=$msg_lf"Keyword templated is required"
     [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
 
     # Postprocess and error trap the configuration
@@ -295,6 +305,9 @@ function initialise {
     postprocess_mount_conf
     err_trap_mount_conf
 
+    # Notification plug-in
+    err_trap_notification_plug_in_conf
+
     # Organisation name
     postprocess_org_name_conf "${org_name:-}" "${org_name_optarg:-}" "$opt_o_flag"
 
@@ -305,12 +318,15 @@ function initialise {
     err_trap_pre_hook_conf
 
     # templated
-    postprocess_templated_conf
-    err_trap_templated_conf
+    if [[ $templated_keyword_found_flag ]]; then
+        postprocess_templated_conf
+        err_trap_templated_conf
+    fi
 
     # Snapshot
     postprocess_snapshot_conf && err_trap_snapshot_conf
 
+    [[ $wmsg != '' ]] && msg W "Error(s) in configuration file $conf_fn:$wmsg"
     [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
 
     # Finish if -C option (check the configuration)
@@ -340,9 +356,8 @@ function initialise {
 }  # end of function initialise
 
 source "$BUNG_LIB_DIR/msg.fun" || exit 1
-source "$BUNG_LIB_DIR/my_cat.fun" || exit 1
+source "$BUNG_LIB_DIR/my_mailx.fun" || exit 1
 source "$BUNG_LIB_DIR/parse_conf.fun" || exit 1
-source "$BUNG_LIB_DIR/parse_conf_templated.fun" || exit 1
 source "$BUNG_LIB_DIR/parse_conf_word.fun" || exit 1
 
 #--------------------------
@@ -455,87 +470,119 @@ function parse_conf_line_data {
     return 0
 }  # end of function parse_conf_line_data
 
+#--------------------------
+# Name: parse_conf_templated
+# Purpose:
+#   Parses a templated line from the configuration file
+#   Note: does not error trap sub-values, only traps syntactical errors
+# Arguments:
+#   $1 - the keyword as read from the configuration file (not normalised)
+#   $2 - the value from the configuration file
+# Global variable usage:
+#   Read:
+#       false
+#       line_n
+#       true
+#   Set:
+#       pc_emsg appended with any error message
+# Output: none except via function fct
+# Return value:
+#   0 when no error detected
+#   1 when an error is detected
+#--------------------------
+function parse_conf_templated {
+    fct "${FUNCNAME[0]}" "started with keyword: ${1:-}, value: ${2:-}, line_n: ${3:-}"
+    local buf dest msg my_rc src unparsed_str
+
+    # Parse arguments
+    # ~~~~~~~~~~~~~~~
+    if (($#!=3)); then
+        msg="Programmming error: ${FUNCNAME[0]} called with $# arguments instead of 3"
+        msg E "$msg (args: $*)"
+    fi
+    local -r keyword=$1
+    local -r value=$2
+    local -r line_n=$3
+
+    # Initialise
+    # ~~~~~~~~~~
+    local -r initial_pc_emsg=$pc_emsg
+    unparsed_str=$value
+
+    # Note that a templated keyword was found in the conffile
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # This function is only called when function parse_conf finds a templated keyword
+    templated_keyword_found_flag=$true
+
+    # Set sub-keyword default values
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    dest_dir_usage_warning=80
+    retention=28
+    templated_timeout=10
+
+    # Parse the subkeywords
+    # ~~~~~~~~~~~~~~~~~~~~~
+    # The syntax (any subkeyword order accepted) is:
+    #   templated =
+    #       template=<file>
+    #       [hostname=<FQDN>] [identity_file=<file>] [password=<password>] [username=<name>]
+    #       [device_type=<device type>]
+    #       [[dest_dir=<dir>] [dest_dir_usage_warning=<%>] [retention=...]]
+    #       [git_root=<dir>]
+    #       [tftp_root=<dir>] [tftp_server=<FQDN or IP address>]
+    #       [timeout=<duration>]
+    local -A subkey_validation
+    subkey_validation[name]='
+        dest_dir
+        dest_dir_usage_warning
+        device_type
+        git_root
+        hostname
+        identity_file
+        retention
+        password
+        template
+        tftp_root
+        tftp_server
+        timeout
+        username
+    '
+    subkey_validation[value_required]='
+        dest_dir
+        dest_dir_usage_warning
+        device_type
+        git_root
+        hostname
+        identity_file
+        password
+        retention
+        template
+        tftp_root
+        tftp_server
+        timeout
+        username
+    '
+    subkey_validation[value_invalid]=
+    local +r subkey_validation
+
+    templated_timeout=10
+    while [[ $unparsed_str != '' ]]
+    do
+       parse_conf_subkey_value "${FUNCNAME[0]}" $line_n
+    done
+    unset unparsed_str
+
+    [[ $pc_emsg = $initial_pc_emsg ]] && my_rc=0 || my_rc=1
+    fct "${FUNCNAME[0]}" "returning with rc $my_rc"
+    return $my_rc
+}  # end of function parse_conf_templated
+
 source "$BUNG_LIB_DIR/postprocess_email_for_report.fun" || exit 1
 source "$BUNG_LIB_DIR/postprocess_mount_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/postprocess_org_name_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/postprocess_templated_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/postprocess_snapshot_conf.fun" || exit 1
-
-#--------------------------
-# Name: remove_old_backups
-# Purpose: checked the output from the rsync command; decides if it was OK
-# Arguments: none
-# Global variable usage:
-#   backup_dir_absolute: read
-#   backup_retention: read
-#   backup_subdir_regex: read
-#   dest_dir_remote_flag: read
-#   dest_dir_remote_host: read
-#   i (function backup's rsync_idx loop variable): read
-#   rsync_backup_dir: read
-#   rsync_cmd_ran_OK_flag: set
-#   rsync_out: read
-#   rsync_rc: read and set
-# Return code: always 0
-#--------------------------
-function remove_old_backups {
-    fct "${FUNCNAME[0]}" 'started'
-    local buf j
-    local remove_old_cmd remove_empty_cmd
-    local msg_part OK_to_continue old_PWD out
-    local remote_out remote_conf_fn
-    local -r tmp_fn=$tmp_dir/${FUNCNAME[0]}
-
-    # Nothing to do?
-    # ~~~~~~~~~~~~~~
-    if ((retention==0)); then
-        msg I "Not removing old files under $dest_dir (retention is 0)"
-        fct "${FUNCNAME[0]}" 'returning'
-        return 0
-    fi
-
-    # Remove old files
-    # ~~~~~~~~~~~~~~~~
-    msg I "Removing old files under $dest_dir"
-    remove_old_cmd=(
-        find
-        "${dest_dir:-UNSET-GUARD}"
-        -type f
-        -mtime +$((retention-1))
-        -execdir rm {} +
-    )
-    msg D "${FUNCNAME[0]}: remove_old_cmd: ${remove_old_cmd[*]}"
-    buf=$("${remove_old_cmd[@]}" 2>&1)
-    if [[ $buf = '' ]]; then
-
-        # Remove empty directories
-        # ~~~~~~~~~~~~~~~~~~~~~~~~
-        msg I "Removing empty directories under $dest_dir"
-        remove_empty_cmd=(
-            find
-            "${dest_dir:-UNSET-GUARD}"
-            -depth -mindepth 1
-            -type d
-            -empty -delete
-        )
-        msg D "${FUNCNAME[0]}: remove_empty_cmd: ${remove_empty_cmd[*]}"
-        buf=$("${remove_empty_cmd[@]}" 2>&1)
-        if [[ $buf != '' ]]; then
-            msg_part=$'\nCommand:\n'
-            msg_part+=${remove_empty_cmd[*]}
-            msg_part+=$'\nOutput:\n'
-            msg W "$msg_part$buf"
-        fi
-    else
-        msg_part=$'\nCommand:\n'
-        msg_part+=${remove_old_cmd[*]}
-        msg_part+=$'\nOutput:\n'
-        msg W "$msg_part$buf"
-    fi
-
-    fct "${FUNCNAME[0]}" 'returning'
-}  # end of function remove_old_backups
-
+source "$BUNG_LIB_DIR/remove_old_backups.fun" || exit 1
 source "$BUNG_LIB_DIR/report_dest_dir_usage.fun" || exit 1
 
 #--------------------------
@@ -570,7 +617,7 @@ function run_command {
     # * Library function parse_conf_templated
     #   * Defaults templated_timeout to 10
     #   * Calls library function parse_conf_subkey_value
-    #     * Sets templated_timeout when finds subkeyword timeout 
+    #     * Sets templated_timeout when finds subkeyword timeout
     # * Local function run_template
     #   * Sets timeout_from_template when finds "Timeout: "
     # * This function sets timeout_from_template empty after use
@@ -629,7 +676,7 @@ function run_template {
     local -r OK_rc_list_line_regex='^OK rc list: '
     local -r OK_regex_line_regex='^OK regex: '
     local -r rc_list_regex='^(>|<|>=|<=|!=|==)[[:digit:]]+(,(>|<|>=|<=|!=|==)[[:digit:]]+)*$'
-    local -r reserved_varname_regex='^[[:space:]]*dest_dir[[:space:]]*='
+    local -r reserved_varname_regex='^[[:space:]]*tmp_dir[[:space:]]*='
     local -r timeout_line_regex='^Timeout: '
     local -r warning_rc_list_line_regex='^Warning rc list: '
     local -r warning_regex_line_regex='^Warning regex: '
@@ -801,6 +848,7 @@ function substitute_tokens {
     return 0
 }  # end of function substitute_tokens
 
+source "$BUNG_LIB_DIR/run_notification_plug_in.fun" || exit 1
 source "$BUNG_LIB_DIR/run_pre_hooks.fun" || exit 1
 source "$BUNG_LIB_DIR/usage.fun" || exit 1
 
@@ -813,10 +861,12 @@ initialise "${@:-}"
 do_snapshots
 do_mounts
 ((pre_hook_idx>-1)) && run_pre_hooks
+if [[ ${dest_dir:-} != '' ]]; then
+    remove_old_backups -m tree -n '*' -s "$dest_dir"
+fi
 run_template
 [[ ${git_root_dir:-} != '' ]] && do_git
 if [[ ${dest_dir:-} != '' ]]; then
-    remove_old_backups
     dest_dir_remote_flag=$false
     report_dest_dir_usage
 fi

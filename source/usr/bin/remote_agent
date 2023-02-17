@@ -19,8 +19,8 @@
 # Purpose:
 #   Either:
 #   * Reports the existence of a given directory
-#   * Removes YYYY/Mmm/DD@HH:mm subtrees from a given directory that were
-#     modified (= created) more than a given number of days ago
+#   * Removes YYYY/Mmm/DD@HH:mm subtrees from a given directory according
+#     to the retention policy
 
 # Usage:
 #   See usage.fun or use -h option.
@@ -83,50 +83,124 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 #--------------------------
 # Name: backup_dir
 # Purpose:
-#   * Removes YYYY/Mmm/DD@HH:mm subtrees from the given directory that were
-#     modified (= created) more than a given number of days ago
+#   * Removes YYYY/Mmm/DD@HH:mm subtrees from the given directory according
+#     to the retention policy
 #--------------------------
 function backup_dir {
     fct "${FUNCNAME[0]}" 'started'
-    local buf find_empty_cmd msg find_old_cmd
-    local -r backup_subdir_regex='./20[[:digit:]]{2}/[[:alpha:]]{3}/[[:digit:]]{2}@[[:digit:]]{2}:[[:digit:]]{2}'
+    local buf candidate_dirs cmd msg_part n_dirs_to_keep rsync_backup_dir
+    local -r backup_subdir_re='./20[[:digit:]]{2}/[[:alpha:]]{3}/[[:digit:]]{2}@[[:digit:]]{2}:[[:digit:]]{2}'
+    local -r retention_percent_usage_re='percent_usage(,[[:digit:]]+min_old_backups)?$'
+    local -r retention_old_backups_re='old_backups$'
+    local -r use_percent_re='^[[:digit:]]+%$'
 
     # Make the given directory current
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    buf=$(ck_file "$conf_file_content" d:rx 2>&1)
+    rsync_backup_dir=$conf_file_content
+    buf=$(ck_file "$rsync_backup_dir" d:rx 2>&1)
     if [[ $buf != '' ]]; then
         msg E "$buf"
     fi
-    cd "$conf_file_content" || finalise 1
+    cd "$rsync_backup_dir" || finalise 1
 
     # Remove old subtrees
     # ~~~~~~~~~~~~~~~~~~~
-    msg I 'Removing old subtrees'
-    find_old_cmd=(
-        find
-        .
-        -maxdepth 3
-        -regextype posix-egrep
-        -mtime +$retention
-        -regex "$backup_subdir_regex"
-        -type d
-        -exec rm -fr {} ';'
-    )
-    msg D "${FUNCNAME[0]}: find_old_cmd: ${find_old_cmd[*]}"
-    buf=$("${find_old_cmd[@]}" 2>&1)
-    [[ $buf != '' ]] && msg E "$buf"
+    # This is copied from rsync_bu's function remove_old_backups local backups section
+    msg I "Removing old directories under '$rsync_backup_dir' for retention $backup_retention"
+    if [[ $backup_retention =~ $retention_percent_usage_re || $backup_retention =~ $retention_old_backups_re ]]; then
+       candidate_dirs=($(find -maxdepth 3 -mindepth 3 -type d -printf "%T+\t%p\n" | sort | sed 's/.*\././'))
+    fi
+    if [[ $backup_retention =~ $retention_percent_usage_re ]]; then
+        # Syntax: <number>percent_usage[,<number>min_old_backups]
+        buf=${backup_retention%min_old_backups}
+        if [[ $buf = $backup_retention ]]; then
+            n_dirs_to_keep=0
+        else
+            n_dirs_to_keep=${buf#*,}
+        fi
+        buf=${backup_retention%,*}
+        target_percent=${buf%percent_usage}
+        usage=
+        for ((j=0;j<${#candidate_dirs[*]}-n_dirs_to_keep;j++))
+        do
+            buf=$(df . 2>&1)
+            case $buf in
+                Filesystem* )
+                    ;;
+                * )
+                    msg E "Unexpected output checking destination directory file system usage: $buf"
+                    ;;
+            esac
+            array=($buf)
+            if [[ ${array[11]} =~ $use_percent_re ]]; then
+                usage=${array[11]//%}
+                msg I "Usage is $usage%"
+                ((usage<=target_percent)) && break
+            else
+                msg E "Unexpected output from$msg_part df $dest_dir: $buf"
+            fi
+            dir="${candidate_dirs[j]}"
+            msg I "Removing $dir"
+            cmd=(rm -r "${candidate_dirs[j]}")
+            buf=$("${cmd[@]}" 2>&1)
+            if [[ $buf != '' ]]; then
+                msg_part='Unexpected output from find while'
+                msg_part+=' removing old directories under'
+                msg W "$msg_part '$backup_dir_absolute': $buf"
+            fi
+        done
+        if [[ $usage != '' ]]; then
+            ((usage>target_percent)) && msg I "Stopped removing old directories to keep $n_dirs_to_keep"
+        else
+            msg_part="No old directories removed because there were only"
+            msg I "$msg_part ${#candidate_dirs[*]} old directories (<= $n_dirs_to_keep)"
+        fi
+    elif [[ $backup_retention =~ $retention_old_backups_re ]]; then
+        n_dirs_to_keep=${backup_retention%old_backups}
+        msg I "Currently ${#candidate_dirs[*]} directories"
+        for ((j=0;j<${#candidate_dirs[*]}-n_dirs_to_keep;j++))
+        do
+            dir=${candidate_dirs[j]}
+            msg I "Removing $dir"
+            cmd=(rm -r "$dir")
+            buf=$("${cmd[@]}" 2>&1)
+            if [[ $buf != '' ]]; then
+                msg_part='Unexpected output from find while'
+                msg_part+=' removing old directories under'
+                msg W "$msg_part '$backup_dir_absolute': $buf"
+            fi
+        done
+    else
+        cmd=(
+            find
+            .
+            -maxdepth 3
+            -regextype posix-egrep
+            -mtime +$((backup_retention-1))
+            -regex "$backup_subdir_re"
+            -type d
+            -exec rm -fr {} ';'
+        )
+        msg D "${FUNCNAME[0]}: cmd: ${cmd[*]}"
+        buf=$("${cmd[@]}" 2>&1)
+        if [[ $buf != '' ]]; then
+            msg_part='Unexpected output from find while'
+            msg_part+=' removing old directories under'
+            msg W "$msg_part '$backup_dir_absolute': $buf"
+        fi
+    fi
 
-    # Remove empty directories
-    # ~~~~~~~~~~~~~~~~~~~~~~~
-    msg I 'Removing empty directories'
-    find_empty_cmd=(
-        find
-        .
-        -depth -mindepth 1 -type d -empty -delete
-    )
-    msg D "${FUNCNAME[0]}: find_empty_cmd: ${find_empty_cmd[*]}"
+    # Remove empty directories (<yyyy>/Mmm and <yyyy>)
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    msg I "Removing empty directories under '$rsync_backup_dir'"
+    cmd=(find -depth -mindepth 1 -type d -empty -delete)
+    msg D "${FUNCNAME[0]}: cmd: ${cmd[*]}"
     buf=$("${find_empty_cmd[@]}" 2>&1)
-    [[ $buf != '' ]] && msg E "$buf"
+    if [[ $buf != '' ]]; then
+        msg_part='Unexpected output from find while'
+        msg_part+=' removing empty directories under'
+        msg W "$msg_part '$backup_dir_absolute': $buf"
+    fi
 
     fct "${FUNCNAME[0]}" 'returning'
 }  # end of function backup_dir
@@ -143,9 +217,9 @@ function dir_report {
     fct "${FUNCNAME[0]}" 'started'
 
     if [[ -d "$conf_file_content" ]]; then
-        msg A Exists
+        msg I "Directory '$conf_file_content' exists"
     else
-        msg A 'Does not exist, is not a directory or is unreachable'
+        msg I "Directory '$conf_file_content' does not exist or is unreachable"
     fi
 
     fct "${FUNCNAME[0]}" 'returning'
@@ -256,7 +330,7 @@ function finalise {
 function initialise {
 
     local args log_dir_realpath msg_part opt_L_log_dir
-    local opt opt_b_flag opt opt_c_flag opt_D_flag opt_l_flag opt_L_flag opt_t_flag
+    local opt opt_b_flag opt opt_c_flag ot_c_val opt_D_flag opt_l_flag opt_L_flag opt_t_flag
     local -r absolute_path_regex='^/'
 
     # Configure shell environment
@@ -354,7 +428,7 @@ function initialise {
             b )
                 backup_dir_mode_flag=$true
                 opt_b_flag=$true
-                retention=$OPTARG
+                backup_retention=$OPTARG
                 ;;
             c )
                 conf_fn=$OPTARG
@@ -584,23 +658,21 @@ function initialise {
 #   Otherwise returns 0
 #--------------------------
 function msg {
-    local buf class dated_message_text i logger_flag logger_msg message_text prefix
-    local -r regex='^(|(logger)|(no_logger))$'
+    local buf class dated_message_text i message_text prefix
+    local -r logger_arg_re='^(|(logger)|(no_logger))$'
     local -r max_logger_chars=100000
 
     # Process arguments
     # ~~~~~~~~~~~~~~~~~
     class="${1:-}"
     message_text="${2:-}"
-    [[ ! ${3:-} =~ $regex ]] && msg E "Programming error: invalid ${FUNCNAME[0]} third argument '${3:-}' (does not match regex $regex)"
+    [[ ! ${3:-} =~ $logger_arg_re ]] \
+        && msg E "Programming error: ${FUNCNAME[0]}: third argument '${3:-}' (does not match regex $logger_arg_re)"
 
     # Class-dependent set-up
     # ~~~~~~~~~~~~~~~~~~~~~~
     logger_flag=$false
     case "$class" in
-        A )
-            prefix=
-            ;;
         D )
             [[ ! $debugging_flag ]] && return
             prefix='DEBUG: '
@@ -649,16 +721,14 @@ function msg {
 
     # Write to file descriptors
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
-    # D, E, I and W normally to log
-    # A messages normally to caller
-    message_text=$prefix$message_text
-    dated_message_text="$(date "$log_date_format") $message_text"
+    # File descriptors &3 and &4 are to caller
+    message_text="$(date "$log_date_format") $message_text"
     if [[ $class = I ]]; then
-        echo "$dated_message_text"
-    elif [[ $class = A ]]; then
+        echo "$message_text"
         echo "$message_text" >&3
     else
-        echo "$dated_message_text" >&2
+        echo "$message_text" >&2
+        echo "$message_text" >&4
         if [[ $class = E ]]; then
             [[ ! $finalising_flag ]] && finalise 1
         fi
@@ -680,11 +750,11 @@ function usage {
     usage=usage:
     usage+=$'\n'"    $script_name -D -c file [-d] [-h] [-l log|-L dir] [-t dir]"
     usage+=$'\n    or'
-    usage+=$'\n'"    $script_name -b retention -c file [-d] [-h] [-l log|-L dir] [-t dir]"
+    usage+=$'\n'"    $script_name -b retention -c dir [-d] [-h] [-l log|-L dir] [-t dir]"
     msg='  where:'
-    msg+=$'\n    -b backup directory mode with retention days'
+    msg+=$'\n    -b Removes old changed and deleted files'
     msg+=$'\n    -c configuration file'
-    msg+=$'\n    -D directory existence report mode'
+    msg+=$'\n    -D Reports existence of directory tree for changed and deleted files'
     msg+=$'\n    -d debugging on'
     msg+=$'\n    -h prints this help and exits'
     msg+=$'\n    -l log file.  Use /dev/tty to log to screen'
@@ -694,6 +764,7 @@ function usage {
     msg+=$'\n    -t temporary directory. Default:'
     msg+=$'\n        When user is root:'"${BUNG_TMP_DIR:-}"
     msg+=$'\n        Otherwise ~/var/run/bung'
+    msg+=$'\n  Intended for use by rsync_bu'
 
     # Display the message(s)
     # ~~~~~~~~~~~~~~~~~~~~~~
@@ -711,6 +782,8 @@ function usage {
 # Name: main
 # Purpose: where it all happens
 #--------------------------
+export BUNG_LOG_DIR=${BUNG_LOG_DIR:-/var/log/bung}
+export BUNG_TMP_DIR=${BUNG_TMP_DIR:-/var/run/bung}
 [[ ${BUNG_COMPGEN_DIR:-} != '' ]] && compgen -v >> $BUNG_COMPGEN_DIR/initial.vars
 initialise "${@:-}"
 [[ $backup_dir_mode_flag ]] && backup_dir

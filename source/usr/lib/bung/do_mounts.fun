@@ -1,4 +1,4 @@
-# Copyright (C) 2021 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -247,6 +247,7 @@ function do_mounts {
     # ~~~~~~~~~~~~~~
     for ((i=0;i<=mount_idx;i++))
     do
+        msg D "Doing mount $i"
         do_mount $i
     done
     

@@ -1,6 +1,6 @@
 #! /bin/bash
 
-# Copyright (C) 2022 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -96,6 +96,8 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 #    |
 #    +-- err_trap_files_and_dirs
 #    |
+#    +-- remove_old_backups
+#    |
 #    +-- backup
 #    |   |
 #    |   +-- my_mysqldump
@@ -117,61 +119,53 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 #--------------------------
 function backup {
     fct "${FUNCNAME[0]}" 'started'
-    local array dest_dir enumerated_dbs db defaults_fn i j
-    local dest_dir dest_dir_remote_flag dest_dir_usage_warning
+    local array enumerated_dbs db i
     local msg_class msg_part my_mysqldump_error_flag mysql_cmd out_fn rc_fn
 
-    # For each configured mysql backup job
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    for ((i=0;i<=mysql_idx;i++))
+    # Enumerate the databases
+    # ~~~~~~~~~~~~~~~~~~~~~~~
+    # This can hang if the --defaults-file is defective so run as a
+    # background job and monitor it
+    out_fn=$tmp_dir/mysql_show_databases.out
+    rc_fn=$tmp_dir/mysql_show_databases.rc
+    touch $tmp_dir/mysql_show_databases.rc \
+        || msg W "Unable to create $rc_fn. $tmp_dir: $(ls -ld $tmp_dir)"
+    mysql_cmd=(mysql --defaults-file="$defaults_fn" --execute='show databases;')
+    mysql_cmd+=(--silent --skip-column-names)
+    msg I "Enumerating databases with command:$msg_lf${mysql_cmd[*]}"
+    (
+        "${mysql_cmd[@]}" > "$out_fn" 2>&1
+        echo $? > "$rc_fn"
+    ) &
+    for ((i=0;i<5;i++))
     do
-        # Enumerate the databases
-        # ~~~~~~~~~~~~~~~~~~~~~~~
-        # This can hang if the --defaults-file is defective so run as a
-        # background job and monitor it
-        defaults_fn="${mysql_defaults_fn[i]}"
-        out_fn=$tmp_dir/mysql_show_databases.out
-        rc_fn=$tmp_dir/mysql_show_databases.rc
-        touch $tmp_dir/mysql_show_databases.rc \
-            || msg W "Unable to create $rc_fn. $tmp_dir: $(ls -ld $tmp_dir)"
-        mysql_cmd=(mysql --defaults-file="$defaults_fn" --execute='show databases;')
-        mysql_cmd+=(--silent --skip-column-names)
-        msg I "Enumerating databases with command:$msg_lf${mysql_cmd[*]}"
-        (
-            "${mysql_cmd[@]}" > "$out_fn" 2>&1
-            echo $? > "$rc_fn"
-        ) &
-        for ((j=0;j<5;j++))
-        do
-            sleep 1
-            jobs | grep --quiet ' Done '
-            (($?==0)) && break
-        done
-        ((i>=4)) && msg E "Unable to enumerate the databases: mysql command did not terminate. Output was: $(cat "$out_fn")"
-        rc=$(cat "$rc_fn")
-        ((rc>0)) && msg E "Unable to enumerate the databases: $(cat "$out_fn")"
-        enumerated_dbs=
-        for db in $(cat "$out_fn")
-        do
-           enumerated_dbs+=" $db "
-        done
-        msg I "Enumerated databases:${enumerated_dbs//  /, }"
-
-        # Run mysqldump
-        # ~~~~~~~~~~~~~
-        my_mysqldump "${mysql_compression[i]}" "${dest_dirs[i]}" \
-            "${mysql_defaults_fn[i]}" "${mysql_exclude[i]}" "${backup_retention[i]}" \
-            "${dest_dir_windows_flag[i]}" "${mysql_timestamp_format[i]}" \
-            "$enumerated_dbs"
-        (($?==0)) && my_mysqldump_error_flag=$false || my_mysqldump_error_flag=$true
-
-        # Log the destination directory usage
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        dest_dir=${dest_dirs[i]}
-        dest_dir_remote_flag=$false
-        dest_dir_usage_warning=${dest_dir_usage_warnings[i]}
-        report_dest_dir_usage
+        sleep 1
+        jobs | grep --quiet ' Done '
+        (($?==0)) && break
     done
+    ((i>=4)) && msg E "Unable to enumerate the databases: mysql command did not terminate. Output was: $(cat "$out_fn")"
+    rc=$(cat "$rc_fn")
+    ((rc>0)) && msg E "Unable to enumerate the databases: $(cat "$out_fn")"
+    enumerated_dbs=
+    for db in $(cat "$out_fn")
+    do
+       enumerated_dbs+=" $db "
+    done
+    msg I "Enumerated databases:${enumerated_dbs//  /, }"
+
+    # Run mysqldump
+    # ~~~~~~~~~~~~~
+    my_mysqldump "$compression" "$dest_dir" \
+        "$defaults_fn" "$mysql_exclude" "$retention" \
+        "$dest_dir_windows_flag" "$mysql_timestamp_format" \
+        "$enumerated_dbs"
+    (($?==0)) && my_mysqldump_error_flag=$false || my_mysqldump_error_flag=$true
+
+    # Log the destination directory usage
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    dest_dir_remote_flag=$false
+    dest_dir_usage_warning=$dest_dir_usage_warning
+    report_dest_dir_usage
 
     [[ $my_mysqldump_error_flag ]] \
         && msg E 'mysqldump error(s) for one or more databases (see warnings above)'
@@ -199,55 +193,48 @@ source "$BUNG_LIB_DIR/err_trap_email_for_report.fun" || exit 1
 #--------------------------
 function err_trap_files_and_dirs {
     fct "${FUNCNAME[0]}" 'started'
-    local buf defaults_fn defaults_file_owner emsg i mysql_dest_dir perms wrong_owner_flag
+    local buf defaults_file_owner emsg i perms wrong_owner_flag
     local -r stat_out_regex=':[rwx-]+$'
 
-    # For each configured mysql job
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Ensure the defaults-file exists ...
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     emsg=
-    for ((i=0;i<=mysql_idx;i++))
-    do
-        # Ensure the defaults-file exists ...
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        defaults_fn=${mysql_defaults_fn[i]}
-        buf=$(ck_file "$defaults_fn" f:r 2>&1)
-        if [[ $buf = '' ]]; then
-            # ... and is owned by and only readable by the current user
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            wrong_owner_flag=$false
-            buf=$(stat --format '%U:%A' "$defaults_fn" 2>&1)
-            if [[ $buf =~ $stat_out_regex ]]; then
-                defaults_file_owner=${buf%:*}
-                if [[ $defaults_file_owner != $user_name ]]; then
-                    emsg+=$msg_lf"$defaults_fn owner is $defaults_file_owner (must be $user_name)"
-                    wrong_owner_flag=$true
+    buf=$(ck_file "$defaults_fn" f:r 2>&1)
+    if [[ $buf = '' ]]; then
+        # ... and is owned by and only readable by the current user
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        wrong_owner_flag=$false
+        buf=$(stat --format '%U:%A' "$defaults_fn" 2>&1)
+        if [[ $buf =~ $stat_out_regex ]]; then
+            defaults_file_owner=${buf%:*}
+            if [[ $defaults_file_owner != $user_name ]]; then
+                emsg+=$msg_lf"$defaults_fn owner is $defaults_file_owner (must be $user_name)"
+                wrong_owner_flag=$true
+            fi
+            perms=${buf#*:}
+            perms=${perms:4:6}
+            if [[ $perms != ------ ]]; then
+                if [[ ! $wrong_owner_flag ]]; then
+                    msg W "$defaults_fn group and other perms: $perms (should be ------); fixing"
+                    chmod go=-rwx "$defaults_fn"
+                else
+                    emsg+=$msg_lf"$defaults_fn group and other perms are $perms"
+                    emsg+=' (must be ------)'
                 fi
-                perms=${buf#*:}
-                perms=${perms:4:6}
-                if [[ $perms != ------ ]]; then
-                    if [[ ! $wrong_owner_flag ]]; then
-                        msg W "$defaults_fn group and other perms: $perms (should be ------); fixing"
-                        chmod go=-rwx "$defaults_fn"
-                    else
-                        emsg+=$msg_lf"$defaults_fn group and other perms are $perms"
-                        emsg+=' (must be ------)'
-                    fi
-                fi
-            else
-                msg W "Unexpected output from stat --format '%U:%A' $defaults_fn: $buf"
             fi
         else
-            emsg+=$msg_lf"defaults_file: $buf"
+            msg W "Unexpected output from stat --format '%U:%A' $defaults_fn: $buf"
         fi
+    else
+        emsg+=$msg_lf"defaults_file: $buf"
+    fi
 
-        # Check the mysqldump destination root directory
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        dest_dir=${dest_dirs[i]}
-        buf=$(ck_file "$dest_dir" d:rwx 2>&1)
-        if [[ $buf != '' ]]; then
-            emsg+=$msg_lf"mysqldump destination root directory: $buf"
-        fi
-    done
+    # Check the mysqldump destination root directory
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    buf=$(ck_file "$dest_dir" d:rwx 2>&1)
+    if [[ $buf != '' ]]; then
+        emsg+=$msg_lf"mysqldump destination root directory: $buf"
+    fi
 
     [[ $emsg != '' ]] && msg E "$emsg"
 
@@ -268,8 +255,7 @@ source "$BUNG_LIB_DIR/err_trap_mount_conf.fun" || exit 1
 #--------------------------
 function err_trap_mysql_conf {
     fct "${FUNCNAME[0]}" 'started'
-    local buf compression i my_rc old_emsg
-    local -r valid_compressions=' 7zip bzip2 gzip pbzip2 p7zip  '    # The trailing double space is required
+    local buf i my_rc old_emsg
     local -r valid_exclude_regex='^[,[:alnum:]_-]+$'
     local -r not_used_regex=':not found$'
 
@@ -279,34 +265,21 @@ function err_trap_mysql_conf {
     emsg=
     my_rc=0
 
-    # Nothing to do?
-    # ~~~~~~~~~~~~~~
-    if ((mysql_idx<0)); then
-        emsg+=$msg_lf"No backup configured (no MySQL keyword)"
-    fi
+    # Trap errors
+    # ~~~~~~~~~~~
+    buf=$compression
+    hash "$buf" &>/dev/null || emsg+=$msg_lf"Compression command $buf not found"
 
-    # For each configured mysql job
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    for ((i=0;i<=mysql_idx;i++))
-    do
-        buf=${mysql_compression[i]}
-        hash "$buf" &>/dev/null \
-            || emsg+=$msg_lf"Compression command $buf not found"
+    buf=$dest_dir_usage_warning
+    err_trap_uint "$buf" "Invalid dest_dir_usage_warning" \
+        && ((buf>100)) \
+        && emsg+=$msg_lf"Invalid dest_dir_usage_warning % $buf (maximum 100)"
 
-        buf=${dest_dir_usage_warnings[i]}
-        err_trap_uint "$buf" "Invalid dest_dir_usage_warning" \
-            && ((buf>100)) \
-            && emsg+=$msg_lf"Invalid dest_dir_usage_warning % $buf (maximum 100)"
+    buf=$mysql_exclude
+    [[ $buf != '' && ! $buf =~ $valid_exclude_regex ]] \
+        && emsg+=$msg_lf"Invalid exclude '$buf' (must match regex $valid_exclude_regex)"
 
-        buf=${mysql_exclude[i]}
-        [[ $buf != '' && ! $buf =~ $valid_exclude_regex ]] \
-            && emsg+=$msg_lf"Invalid exclude '$buf' (must match regex $valid_exclude_regex)"
-
-        buf=${backup_retention[i]}
-        if [[ $buf != '' ]]; then
-           err_trap_uint "$buf" "Invalid retention value"
-        fi
-    done
+    err_trap_retention_conf "$retention"
 
     [[ $emsg != '' ]] && my_rc=1
     emsg=$old_emsg$emsg
@@ -314,8 +287,10 @@ function err_trap_mysql_conf {
     return $my_rc
 }  # end of function err_trap_mysql_backup_conf
 
+source "$BUNG_LIB_DIR/err_trap_notification_plug_in_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_post_hook_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_pre_hook_conf.fun" || exit 1
+source "$BUNG_LIB_DIR/err_trap_retention_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_shutdown.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_snapshot_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_uint.fun" || exit 1
@@ -343,8 +318,6 @@ function initialise {
 
     # Parse configuration file
     # ~~~~~~~~~~~~~~~~~~~~~~~~
-    emsg=
-    mysql_idx=-1
     # Note: ensure a space on both sides of each string in the arrays
     local -A keyword_validation
     keyword_validation[name]='
@@ -353,6 +326,7 @@ function initialise {
         maxmemorysize
         mount
         mysql
+        notificationplug_in 
         numberofopenfiles
         organisationname
         post_hook
@@ -360,7 +334,7 @@ function initialise {
         shutdown
         snapshot
     '
-    keyword_validation[repeat invalid]='
+    keyword_validation[repeat_invalid]='
         logretention
         maxmemorysize
         mount
@@ -372,7 +346,9 @@ function initialise {
         shutdown
     '
     local +r keyword_validation
+    mysql_keyword_found_flag=$false
     parse_conf "$conf_fn"
+    [[ ! $mysql_keyword_found_flag ]] && emsg+=$msg_lf"Keyword mysql is required"
     [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
 
     # Postprocess and error trap the configuration
@@ -399,6 +375,9 @@ function initialise {
     # Mount
     postprocess_mount_conf && err_trap_mount_conf
 
+    # Notification plug-in
+    err_trap_notification_plug_in_conf
+
     # Organisation name
     postprocess_org_name_conf "${org_name:-}" "${org_name_optarg:-}" "$opt_o_flag"
 
@@ -417,12 +396,30 @@ function initialise {
     # Snapshot
     postprocess_snapshot_conf && err_trap_snapshot_conf
 
+    [[ $wmsg != '' ]] && msg W "Error(s) in configuration file $conf_fn:$wmsg"
     [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
 
     # Finish if -C option (check the configuration)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [[ $conf_check_flag ]] \
         && { msg I "Configuration check OK for $conf_fn"; finalise 0; }
+
+    # Generate the output file name suffix and matching patterns
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    local -r sevenzip_regex=7z
+    local -r bzip_regex=bzip
+    mysql_dump_compressed_fn_suffix=.sql
+    find_pat=*-*.sql
+    if [[ $compression =~ $sevenzip_regex ]]; then
+        mysql_dump_compressed_fn_suffix+=.7z
+        find_pat_suffix+=.7z
+    elif [[ $compression =~ $bzip_regex ]]; then
+            mysql_dump_compressed_fn_suffix+=.bz2
+            find_pat_suffix+=.bz2
+    elif [[ $compression = gzip ]]; then
+            mysql_dump_compressed_fn_suffix+=.gz
+            find_pat_suffix+=.gz
+    fi
 
     # Check mysqld is running
     # ~~~~~~~~~~~~~~~~~~~~~~~
@@ -432,7 +429,7 @@ function initialise {
     fi
 
     # Create and lock the PID file
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     do_pid "$(printf '%q ' "${args[@]}")"
 
     # Log limits (memory, open files) or set if configured
@@ -443,19 +440,19 @@ function initialise {
 }  # end of function initialise
 
 source "$BUNG_LIB_DIR/msg.fun" || exit 1
-source "$BUNG_LIB_DIR/my_cat.fun" || exit 1
+source "$BUNG_LIB_DIR/my_mailx.fun" || exit 1
 
 #--------------------------
 # Name: my_mysqldump
 # Purpose: backs up MySQL databases
 # Arguments:
-#   $1: $mysql_compression[i]
-#   $2: $dest_dirs[i]
-#   $3: $mysql_defaults_fn[i]
-#   $4: $mysql_exclude[i]
-#   $5: $backup_retention[i]
-#   $6: $dest_dir_windows_flag[i]
-#   $7: $mysql_timestamp_format[i]
+#   $1: $compression
+#   $2: $dest_dir
+#   $3: $defaults_fn
+#   $4: $mysql_exclude
+#   $5: $retention
+#   $6: $dest_dir_windows_flag
+#   $7: $mysql_timestamp_format
 #   $8: $database_names
 # Return code: always 0; does not return on error
 #--------------------------
@@ -463,8 +460,6 @@ function my_mysqldump {
     fct "${FUNCNAME[0]}" 'started'
     local buf emsg msg 
     local grep_out mysqldump_cmd mysql_dump_compressed_fn tmp_fn unmatched_excludes
-    local -r sevenzip_regex=7z
-    local -r bzip_regex=bzip
     local -r mysqldump_warning_regex=warning
     local -r mysqldump_error_regex='access denied|\(errcode: [[:digit:]]+\)|error[: ]'
     local my_rc=0
@@ -559,29 +554,14 @@ function my_mysqldump {
         mysqldump_cmd+=(--single-transaction)
         mysqldump_cmd+=("$db")
 
-        # Generate the output file name and matching patterns
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        mysql_dump_compressed_fn=$dir/$db-$date.sql
-        find_pat=$dir/$db-*.sql
+        # Generate the output file name
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        mysql_dump_compressed_fn=$dir/$db-$date$mysql_dump_compressed_fn_suffix
         if [[ $dest_dir_windows_flag ]]; then
             mysql_dump_compressed_fn=$(
                 echo -n "$mysql_dump_compressed_fn" \
                 | tr '[\001-\031]\"*:<>?|' '[_*]'
             )
-            find_pat=$(
-                echo -n "$find_pat" \
-                | tr '[\001-\031]\"*:<>?|' '[_*]'
-            )
-        fi
-        if [[ $compression =~ $sevenzip_regex ]]; then
-            mysql_dump_compressed_fn+=.7z
-            find_pat+=.7z
-        elif [[ $compression =~ $bzip_regex ]]; then
-                mysql_dump_compressed_fn+=.bz2
-                find_pat+=.bz2
-        elif [[ $compression = gzip ]]; then
-                mysql_dump_compressed_fn+=.gz
-                find_pat+=.gz
         fi
 
         # Ensure the output file can be created
@@ -623,11 +603,6 @@ function my_mysqldump {
         fi
         rm "$tmp_fn" || finalise 1
         msg I "Backup file created:$msg_lf$(/bin/ls -lh "$mysql_dump_compressed_fn")"
-
-        # Remove old backups
-        # ~~~~~~~~~~~~~~~~~~
-        find "${find_pat%/*}" -maxdepth 1 -name "${find_pat##*/}" -mtime +$retention -execdir rm {} \;
-
     done
 
     fct "${FUNCNAME[0]}" "returning $my_rc"
@@ -651,8 +626,8 @@ source "$BUNG_LIB_DIR/parse_conf.fun" || exit 1
 #       line_n
 #       true
 #   Set:
-#       mysql_idx incremented
-#       mysql_* arrays initialised, maybe set
+#       mysql_keyword_found_flag set $true
+#       MySQL keyword sub-keyword values defaulted and set
 #       pc_emsg appended with any error message
 # Output: none except via function fct
 # Return value:
@@ -661,7 +636,7 @@ source "$BUNG_LIB_DIR/parse_conf.fun" || exit 1
 #--------------------------
 function parse_conf_mysql {
     fct "${FUNCNAME[0]}" "started with keyword: ${1:-}, value: ${2:-}, line_n: ${3:-}"
-    local buf dest idx initial_pc_emsg msg_part my_rc src
+    local buf dest initial_pc_emsg msg_part my_rc src
 
     # Parse arguments
     # ~~~~~~~~~~~~~~~
@@ -678,28 +653,33 @@ function parse_conf_mysql {
     local -r initial_pc_emsg=$pc_emsg
     unparsed_str=$value
 
+    # Note that a MySQL keyword was found in the conffile
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # This function is only called when function parse_conf finds a MySQL keyword
+    mysql_keyword_found_flag=$true
+
     # Set the sub-keyword default values
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    idx=$((++mysql_idx))
-    backup_retention[idx]=28
+    compression=gzip
+    defaults_fn=mysql.cnf
     if [[ $user_name = root ]]; then
-        dest_dirs[idx]=/var/backup/mysql
+        dest_dir=/var/backup/mysql
     else
-        dest_dirs[idx]=$user_home_dir/var/backup/mysql
+        dest_dir=$user_home_dir/var/backup/mysql
     fi
-    dest_dir_usage_warnings[idx]=80
-    dest_dir_windows_flag[idx]=$false
-    mysql_compression[idx]=gzip
-    mysql_defaults_fn[idx]=mysql.cnf
-    mysql_exclude[idx]=
-    mysql_timestamp_format[idx]=%Y-%m-%d@%H:%M:%S
+    dest_dir_usage_warning=80
+    dest_dir_windows_flag=$false
+    mysql_exclude=
+    mysql_timestamp_format=%Y-%m-%d@%H:%M:%S
+    retention=28
 
     # Get any sub-keyword values
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Syntax:
-    #   MySQL = [compression=program] [dest_dir=dir] [dest_dir_usage_warning=%]
-    #           [dest_dir_windows=yes|no] [def=file] [exclude=db1,db2 ...]
-    #           [retention=days] [timestamp_format=format]
+    #   MySQL = [compression=<program>] [dest_dir=<dir>] [dest_dir_usage_warning=<%>]
+    #       [dest_dir_windows=<yes|no>] [def=<file>] [exclude=<db1,db2 ...>]
+    #       [retention=<number>[days]]|0[days]]|<number>percent_usage[,<number>min_old_backups]|<number>old_backups]
+    #       [timestamp_format=<format>]
     # Note: ensure a space on both sides of each string in the arrays
     local -A subkey_validation
     subkey_validation[name]='
@@ -744,7 +724,7 @@ source "$BUNG_LIB_DIR/postprocess_mount_conf.fun" || exit 1
 #     Processes mysql values from the conf file
 # Arguments: none
 # Global variable usage:
-#   May change backup_retention[]
+#   May change retention[]
 # Output: none
 # Return value: always 0
 #--------------------------
@@ -752,21 +732,18 @@ function postprocess_mysql_conf {
     fct "${FUNCNAME[0]}" started
     local i
 
-    # For each set of mysql configurations
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    for ((i=0;i<=mysql_idx;i++))
-    do
-        # Make relative paths absolute
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        [[ ! ${mysql_defaults_fn[i]} =~ $absolute_path_re ]] \
-            && mysql_defaults_fn[i]=$conf_dir/${mysql_defaults_fn[i]}
-    done
+    # Make relative paths absolute
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [[ ! $defaults_fn =~ $absolute_path_re ]] \
+        && defaults_fn=$conf_dir/$defaults_fn
 
     fct "${FUNCNAME[0]}" returning
 }  # End of function postprocess_mysql_conf
 
 source "$BUNG_LIB_DIR/postprocess_snapshot_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/report_dest_dir_usage.fun" || exit 1
+source "$BUNG_LIB_DIR/remove_old_backups.fun" || exit 1
+source "$BUNG_LIB_DIR/run_notification_plug_in.fun" || exit 1
 source "$BUNG_LIB_DIR/run_pre_hooks.fun" || exit 1
 source "$BUNG_LIB_DIR/usage.fun" || exit 1
 
@@ -780,5 +757,6 @@ do_snapshots
 do_mounts
 err_trap_files_and_dirs
 ((pre_hook_idx>-1)) && run_pre_hooks
+remove_old_backups -m tree -n "*$find_pat_suffix" -s "$dest_dir" 
 backup
 finalise 0

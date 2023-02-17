@@ -1,5 +1,5 @@
 .ig
-Copyright (C) 2021 Charles Atkinson
+Copyright (C) 2022 Charles Michael Atkinson
 
 Permission is granted to make and distribute verbatim copies of this
 manual provided the copyright notice and this permission notice are
@@ -18,7 +18,7 @@ the original English.
 ..
 .\" No adjustment (ragged right)
 .na
-.TH openldap_bu 5 "11 Nov 2022" "Auroville" "Version 3.2.7"
+.TH openldap_bu 5 "10 Feb 2023" "Auroville" "Version 3.5.0"
 .SH NAME
 ldap_bu \- configuration for bung's OpenLDAP backup script
 .SH SYNOPSIS
@@ -29,7 +29,10 @@ ldap_bu \- configuration for bung's OpenLDAP backup script
 .HP
 \fBMount\fB\~=\~\fI... 
 .HP
-\fBOpenLDAP\~= \fR[\fBdest_dir=\fIdir\fR] \fR[\fBdest_dir_usage_warning=\fI%\fR] \fR[\fBretention=\fIdays\fR]
+\fBOpenLDAP\~= 
+\fR[\fBdest_dir=\fIdir\fR] 
+\fR[\fBdest_dir_usage_warning=\fI%\fR] 
+\fR[\fBretention=\fInumber\fR[\fBdays\fR]|\fB0\fR[\fBdays\fR]]|\fInumber\fBpercent_usage\fR[\fB,\fInumber\fBmin_old_backups\fR]|\fInumber\fBold_backups]
 .HP
 \fBOrganisation name\fB\~=\~\fI... 
 .HP
@@ -47,15 +50,7 @@ This page describes the keywords specific to ldap_bu
 The \fBbung-common\fR (5) man page describes
 the configuration file format
 and the common keywords ellipsised in the \fBSYNOPSIS\fR above
-.SH OPTIONS (keywords)
-.TP
-OpenLDAP
-.RS
-.HP
-.nh
-\fBOpenLDAP\~= \fR[\fBdest_dir=\fIdir\fR] \fR[\fBdest_dir_usage_warning=\fI%\fR] \fR[\fBretention=\fIdays\fR]
-.P
-Required
+.SH OPTIONS (sub-keywords)
 .P
 \fBdest_dir\fR is the directory to write the backup files to.
 .br
@@ -68,9 +63,44 @@ Use dest_dir_usage_warning=0 to disable.
 .br
 Default: 80
 .P
-\fBretention\fR specifies the number of days that OpenLDAP backup files are kept.
+\fBretention=\fI...\fR
 .br
-Default: 28
+Specifies old backup files retention.
+.P
+Default: 28 day retention.
+.br
+.RS
+.P
+\fBretention=\fInumber\fR[\fBdays\fR]
+.br
+Specifies the number of days that these files are kept.
+.P
+\fBretention=0\fR[\fBdays\fR]
+.br
+Specifies no removal of old backup files.
+.P
+\fInumber\fBpercent_usage\fR[\fB,\fInumber\fBmin_old_backups\fR]
+.RS
+\fInumber\fBpercent_usage\fR
+.br
+Specifies repeatedly removing the oldest backup file until the file system usage is \fInumber\fR percent or less.
+.P
+When more than one backup is written to the same file system,
+this can result in all the old backup files
+being removed before the specified % file system usage is achieved
+because of space used by another backup.
+.P
+\fInumber\fBpercent_usage\fR\fB,\fInumber\fBmin_old_backups\fR
+.br
+Works like \fInumber\fBpercent_usage\fR except the most recent
+\fInumber\fBmin_old_backups\fR are not removed.
+.RE
+.P
+\fBretention=\fInumber\fBold_backups\fR
+.br
+Specifies removing all but the most recent \fInumber\fR old backup files.
+.RE
+.P
 .RE
 .SH ENVIRONMENT
 Environment variables are described in bung-common (5).
@@ -78,12 +108,12 @@ Environment variables are described in bung-common (5).
 Default directories are described in bung-common (5).
 .SH EXAMPLES
 Example ldap_bu configuration files are
-normally installed in /usr/share/bung/doc/examples
+normally installed in /usr/share/doc/bung/examples
 .SH AUTHOR
-Charles Atkinson bung@charlesmatkinson.org
+Charles Michael Atkinson bung@charlesmatkinson.org
 .SH SEE ALSO
 \fBbung-common\fR(5 and 8),
 \fBldap_bu\fR(8)
 .br
 The bung user guide,
-normally installed in /usr/share/bung/doc
+normally installed in /usr/share/doc/bung

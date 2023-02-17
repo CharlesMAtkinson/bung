@@ -1,0 +1,115 @@
+---
+- debug:  # noqa unnamed-task
+    msg: "Started running role {{ role_name }}"
+
+- name: Set root password in debconf
+  debconf:
+    name: "mariadb-server"
+    question: "mysql-server/root_password"
+    vtype: password
+    value: "{{ mariadb_server_user_root_password }}"
+  no_log: true
+
+- name: Set root password again in debconf
+  debconf:
+    name: "mariadb-server"
+    question: "mysql-server/root_password_again"
+    vtype: password
+    value: "{{ mariadb_server_user_root_password }}"
+  no_log: true
+
+- name: Install mariadb_server package
+  apt:
+    name: mariadb-server
+    state: present
+
+- name: Start mariadb.service
+  service:
+    name: mariadb
+    state: started
+
+- name: Create /root/.my.cnf
+  template:
+    src: root/.my.cnf/root.j2
+    dest: /root/.my.cnf
+    backup: true
+    mode: "600"
+
+- name: Synchronize supporting files
+  synchronize:
+    src: files/{{ ansible_distribution_release }}/
+    dest: /
+    rsync_opts:
+      - "--backup"
+      - "--chown=root:root"
+      - "--suffix=_before_{{ lookup('pipe', 'date +%d-%b-%Y@%H:%M') }}"
+
+- name: Configure bung to backup MariaDB
+  when: "'bung_computers' in group_names"
+  block:
+    - name: List MariaDB users
+      command: |
+        mysql --batch --user=root --skip-column-names --execute="
+          SELECT CONCAT(QUOTE(user),'@',QUOTE(host)) UserAccount
+            FROM mysql.user;
+        "
+      register: mariadb_users
+
+    - name: Create MariaDB user backup_user
+      when: mariadb_users.stdout is not search('backup_user')
+      command: |
+        mysql --user=root --skip-column-names --execute="
+            CREATE USER 'backup_user'@'localhost'
+              IDENTIFIED BY '{{ mariadb_server_user_backup_user_password }}';
+            GRANT
+                EVENT,
+                LOCK TABLES,
+                PROCESS,
+                RELOAD,
+                SELECT,
+                SHOW DATABASES,
+                SHOW VIEW,
+                SUPER,
+                TRIGGER
+              ON *.*
+              TO 'backup_user'@'localhost'
+              IDENTIFIED BY '{{ mariadb_server_user_backup_user_password }}'
+              WITH
+                MAX_QUERIES_PER_HOUR 0
+                MAX_CONNECTIONS_PER_HOUR 0
+                MAX_UPDATES_PER_HOUR 0
+                MAX_USER_CONNECTIONS 0
+              ;
+            FLUSH PRIVILEGES;
+          "
+      no_log: true
+
+    # Set up MariaDB backup by bung
+
+    - name: Create /var/backup/mysql
+      file:
+        path: /var/backup/mysql
+        state: directory
+        mode: "755"
+
+    - name: Create /etc/bung/mariadb
+      template:
+        src: etc/bung/mariadb/root.j2
+        dest: /etc/bung/mariadb
+        mode: "600"
+        backup: true
+
+    - name: Create /etc/bung/mysql.cnf
+      template:
+        src: etc/bung/mysql.cnf/root.j2
+        dest: /etc/bung/mysql.cnf
+        backup: true
+        mode: "600"
+
+    - name: Add to the bung all conffile
+      lineinfile:
+        path: /etc/bung/all
+        line: "Subsidiary script = mysql_bu mariadb"
+
+- debug:  # noqa unnamed-task
+    msg: "Ending role {{ role_name }}"

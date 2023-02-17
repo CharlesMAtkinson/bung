@@ -257,7 +257,7 @@ function run_remote_agent {
     if [[ $remote_agent_opt = -D ]]; then
         msg I 'Running remote agent to check directory existence'
     else
-        msg I 'Running remote agent to remove backups older than the retention time'
+        msg I "Running remote agent to remove old changed and deleted files for retention ${remote_agent_opt#-b }"
     fi
     remote_agent_args=("$remote_agent_opt" -c "$remote_conf_fn")
     [[ $opt_l_flag ]] && remote_agent_args+=(-L "$ssh_host_log_dir")

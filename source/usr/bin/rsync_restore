@@ -1,6 +1,6 @@
 #! /bin/bash
 
-# Copyright (C) 2021 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,14 +16,19 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
 
-# Purpose: 
-#   Restores from rsync backups made by the Backup Next Generation (bung) 
-#   suite's rsync_bu script
+# Purpose:
+#   Restores to "point in time" from rsync backups made by the Backup Next Generation (bung) suite's rsync_bu script
+#   * If command line options do not specify, interacts with the user to get
+#       * The rsync_bu configuration file
+#       * The YYYY/Mmm/dd@hh:mm subdirectory of the rsync backup directory (Changed and deleted files)
+#       * The tree to restore
+#       * The directory to restore it to
+#   * Does not do any snapshots or mounts
 
-# Usage: 
+# Usage:
 #   See usage.fun or use -h option.
-    
-# Programmers' notes: error and trap handling: 
+
+# Programmers' notes: error and trap handling:
 #   * All errors are fatal and finalise() is called.
 #   * At any time, a trapped event may transfer control to finalise().
 #   * To allow finalise() to tidy up before exiting, changes that need to be
@@ -64,146 +69,99 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 #    |   |   |
 #    |   |   +-- parse_conf_rsync
 #    |   |
-#    |   +-- err_trap_uint
-#    |   |   |
-#    |   |   + ck_uint
-#    |   |
-#    |   +-- postprocess_mount_conf
-#    |   |
-#    |   +-- err_trap_mount_conf
-#    |   |
 #    |   +-- postprocess_rsync_conf
 #    |   |
 #    |   +-- err_trap_rsync_conf
 #    |   |
-#    |   +-- err_trap_shutdown
-#    |   |
-#    |   +-- postprocess_snapshot_conf
-#    |   |
-#    |   +-- err_trap_snapshot_conf
-#    |   |
 #    |   +-- do_pid
-#    |
-#    +-- do_mount
-#    |   |
-#    |   +-- get_fs_type
-#    |   |
-#    |   +-- do_mount_command
-#    |
-#    +-- err_trap_rsync_files_and_dirs
 #    |
 #    +-- restore
 #    |
 #    +-- finalise
+#        |
+#        +-- functions as documented in finalise.fun
 #
 # Utility functions called from various places:
-#     ck_file do_umounts fct msg parse_conf_subkey_value parse_conf_word
+#     ck_additional_time ck_file convert_additional_time_to_seconds do_umounts fct msg parse_conf_subkey_value parse_conf_word
 
 # Function definitions in alphabetical order.  Execution begins after the last function definition.
 
+#-----------------------
+# Name: ck_additional_time
+# Args: $1: additional time
+# Global variables: sets additional_time_emsg
+# Purpose: checks the additional time
 #--------------------------
-# Name: restore
-# Purpose: runs rsync
-# Arguments: none
-# Return code: always 0; does not return on error
-#--------------------------
-function restore {
+function ck_additional_time {
     fct "${FUNCNAME[0]}" 'started'
-    local array backup_dir buf i last_one_flag newer_fn
+    local buf days hours seconds my_rc
+    local -r additional_time=$1
+    local -r additional_time_OK_re='^((([[:digit:]]+d)?([[:digit:]]+h))?[[:digit:]]+m)?[[:digit:]]+s$'
 
-    # The procedure is:
-    #   1. Restore from the last rsync backup
-    #   2. Restore from the rsync backup's backup directories, starting with
-    #      the most recent and continuing with successively older ones up to and
-    #      including the one named by the user
-    #   3. Delete any restored files which are newer than the time of the
-    #      backup named by the user.  In case a snapshot was not used add an
-    #      hour to approximate the time it may have taken for the backup to run.
-
-    # Restore from the last rsync backup
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    msg I "Restoring from the last rsync backup ..."
-    [[ $subdir = '' ]] && buf= || buf=$subdir/
-    dest_dir=$dest_dir/$buf
-    dest_dir=${dest_dir//\/*(\/)/\/}    # Change multiple adjacent "/"s to /
-    rsync -a "$dest_dir" "$restore_dir" --exclude "${rsync_backup_dir[0]}"
-
-    # Generate a list of rsync's backup subdirectories
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    backup_dir=$dest_dir/$rsync_backup_dir
-    backup_dir=${backup_dir//\/*(\/)/\/}    # Change multiple adjacent "/"s to /
-    cd "$backup_dir" || finalise 1
-    while IFS= read -r -d '' buf
-    do
-       array+=("${buf#* ./}")
-    done < <( find -mindepth 3 -maxdepth 3 -type d -type d -printf '%Ts %p\0' | sort -nr )
-    cd - >/dev/null
-    [[ ${array[0]:-} = '' ]] \
-        && msg E "No backup subdirectories found under '$backup_dir'"
-
-    # Restore from the rsync's backup subdirectories
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    last_one_flag=$false
-    #for ((i=0;i<${#array[*]};i++))
-    for ((i=${#array[*]}-1;i>0;i--))
-    do
-        [[ ${array[i]} = $last_backup_subdir ]] && last_one_flag=$true
-        backup_subdir=${dest_dirs[0]}/${rsync_backup_dir[0]}/${array[i]}
-        backup_subdir=${backup_subdir//\/*(\/)/\/}    # Change multiple adjacent "/"s to /
-        msg I "Restoring from ${array[i]} ..."
-        rsync -a "$backup_subdir/" "$restore_dir"
-        [[ $last_one_flag ]] && break
-    done 
-
-    # Get the time of the backup named by the user
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # The subdir name is YYYY/Mmm/dd@hh:mm, example: 2014/Nov/23@10:15
-    # The date command accepts dates like 23 Nov 2014 10:15
-    buf=$last_backup_subdir
-    buf=$(date --date="${buf:9:2} ${buf:5:3} ${buf:0:4} ${buf:12:5}" +%s)
-    ck_uint "$buf"
-    if (($?!=0)); then
-        msg E "Programming error: ${FUNCNAME[0]}, line $LINENO, buf: $buf"
-    fi
-
-    # Add some time
-    # ~~~~~~~~~~~~~
-    # For snapshots, add a minute to allow for no seconds in the name
-    # For backups without a snapshot, add an hour to very crudely allow
-    # for the backup running time.
-    if [[ $snapshot_flag ]]; then
-        msg I "Removing files later than $last_backup_subdir ..."
-        msg D "Snapshot used; adding a minute to the $last_backup_subdir time"
-        ((buf+=60))    # Add a minute
+    additional_time_emsg=
+    if [[ $additional_time =~ $additional_time_OK_re ]]; then
+        buf=$additional_time
+        seconds=${buf#*m}
+        seconds=${seconds%s}
+        buf=${buf%"$seconds"s}
+        minutes=${buf#*h}
+        minutes=${minutes%m}
+        buf=${buf%"$minutes"m}
+        hours=${buf#*d}
+        hours=${hours%h}
+        buf=${buf%"$hours"h}
+        days=${buf#*d}
+        days=${days%d}
+        ((${seconds%s}>59)) && additional_time_emsg+=$'\n'"Invalid time $additional_time (more than 59 seconds)"
+        [[ $minutes != '' ]] && ((${minutes%s}>59)) \
+           && additional_time_emsg+=$'\n'"Invalid time $additional_time (more than 59 minutes)"
+        [[ $hours != '' ]] && ((${hours%s}>23)) \
+           && additional_time_emsg+=$'\n'"Invalid time $additional_time (more than 23 hours)"
+       additional_time_emsg=${additional_time_emsg#$'\n'}
     else
-        msg I "Removing files later than $last_backup_subdir plus an hour ..."
-        msg D "Snapshot not used; adding an hour to the $last_backup_subdir time"
-        ((buf+=3600))    # Add an hour
+       additional_time_emsg="Invalid time $additional_time (does not match $additional_time_OK_re)"
     fi
 
-    # Remove files newer than the time of the backup named by the user
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # find's -newerXY would be nice; its t option for Y avoids the need for a 
-    # file for the timestamps but it is not clear from the man page what the X
-    # value means when Y is t.
-    newer_fn=$tmp_dir/newer
-    touch -t "$(date --date=@$buf +%Y%m%d%H%M)" "$newer_fn" || finalise 1
-    msg D "$newer_fn:"$'\n'" $(stat "$newer_fn")"
-    find "$restore_dir" -type f -newer "$newer_fn" -delete
-
-    fct "${FUNCNAME[0]}" 'returning'
-    return
-}  # end of function restore
+    [[ $additional_time_emsg = '' ]] && my_rc=0 || my_rc=1
+    fct "${FUNCNAME[0]}" "returning $my_rc"
+    return $my_rc
+}  # end of function ck_additional_time
 
 source "$BUNG_LIB_DIR/ck_file.fun" || exit 1
 source "$BUNG_LIB_DIR/ck_uint.fun" || exit 1
-source "$BUNG_LIB_DIR/do_mounts.fun" || exit 1
-source "$BUNG_LIB_DIR/do_umounts.fun" || exit 1
-source "$BUNG_LIB_DIR/err_trap_mount_conf.fun" || exit 1
+
+#-----------------------
+# Name: convert_additional_time_to_seconds
+# Args: none
+# Global variables: additional_time read and set
+# Purpose: converts additional time to seconds
+#--------------------------
+function convert_additional_time_to_seconds {
+    fct "${FUNCNAME[0]}" 'started'
+    local buf days hours seconds
+
+    buf=$additional_time
+    seconds=${buf#*m}
+    seconds=${seconds%s}
+    buf=${buf%"$seconds"s}
+    minutes=${buf#*h}
+    minutes=${minutes%m}
+    buf=${buf%"$minutes"m}
+    hours=${buf#*d}
+    hours=${hours%h}
+    buf=${buf%"$hours"h}
+    days=${buf#*d}
+    days=${days%d}
+    additional_time=seconds
+    [[ $minutes != '' ]] && additional_time=$((additional_time+(minutes*60)))
+    [[ $hours != '' ]] && additional_time=$((additional_time+(hours*60*60)))
+    [[ $days != '' ]] && additional_time=$((additional_time+(days*24*60*60)))
+
+    fct "${FUNCNAME[0]}" 'returning'
+}  # end of function convert_additional_time_to_seconds
+
+source "$BUNG_LIB_DIR/err_trap_retention_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_rsync_conf.fun" || exit 1
-source "$BUNG_LIB_DIR/err_trap_rsync_files_and_dirs.fun" || exit 1
-source "$BUNG_LIB_DIR/err_trap_shutdown.fun" || exit 1
-source "$BUNG_LIB_DIR/err_trap_snapshot_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/err_trap_uint.fun" || exit 1
 source "$BUNG_LIB_DIR/fct.fun" || exit 1
 
@@ -211,102 +169,94 @@ source "$BUNG_LIB_DIR/fct.fun" || exit 1
 # Name: finalise
 # Purpose: cleans up and exits
 # Arguments:
-#    $1  return value
-# Return code (on exit): 
-#   The sum of zero plus
-#      1 if any warnings
-#      2 if any errors
-#      4,8,16 unused
-#      32 if terminated by a signal
+#    $1  exit code
+# Exit code:
+#   When not terminated by a signal, the sum of zero plus
+#      1 when any warnings
+#      2 when any errors
+#      4 when called by hotplug_bu or super_bu and a subsidiary script was
+#        terminated by a signal
+#   When terminated by a trapped signal, the sum of 128 plus the signal number
 #--------------------------
 function finalise {
     fct "${FUNCNAME[0]}" 'started'
-    [[ ${BUNG_COMPGEN_DIR:-} != '' ]] && compgen -v >> $BUNG_COMPGEN_DIR/final.vars
-    local buf my_retval tmp_dir_regex
+    [[ ${bung_compgen_dir:-} != '' ]] && compgen -v >> $bung_compgen_dir/final.vars
+    local buf i msg my_exit_code sig_name
 
     finalising_flag=$true
-    
-    # Interrupted?  Message and exit return value
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    my_retval=0
-    case $1 in 
-        129 | 130 | 131 | 143 )
-            ((my_retval+=32))
-            case $1 in
-                129 )
-                    buf='SIGHUP'
-                    ;;
-                130 )
-                    buf='SIGINT'
-                    ;;
-                131 )
-                    buf='SIGQUIT'
-                    ;;
-                143 )
-                    buf='SIGTERM'
-                    ;;
-            esac
-            msg I "finalising on $buf"
-            ;;
-    esac
-
-    # Unmount file systems mounted earlier
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    do_umounts
-
-    # Remove temporary directory
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~
-    tmp_dir_regex="^/tmp/$script_name\..{6}$"
-    [[ $tmp_dir_created_flag \
-        && ${tmp_dir:-} =~ $tmp_dir_regex \
-    ]] && rm -fr "$tmp_dir"
+ 
+    # Interrupted?
+    # ~~~~~~~~~~~~
+    my_exit_code=0
+    if ck_uint "${1:-}"; then
+        if (($1>128)); then    # Trapped interrupt
+            interrupt_flag=$true
+            i=$((128+${#sig_names[*]}))    # Max valid interrupt code
+            if (($1<i)); then
+                my_exit_code=$1
+                sig_name=${sig_names[$1-128]}
+                msg I "Finalising on $sig_name"
+                [[ ${summary_fn:-} != '' ]] \
+                    && echo "Finalising on $sig_name" >> "$summary_fn"
+            else
+               msg="${FUNCNAME[0]} called with invalid exit value '${1:-}'"
+               msg+=" (> max valid interrupt code $i)"
+               msg E "$msg"    # Returns because finalising_flag is set
+            fi
+        fi
+    fi
 
     # Final log messages and exit return value adjustment
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     if [[ $warning_flag ]]; then
-        msg I "There was at least one WARNING"
-        ((my_retval+=1))
+        msg I "There was at least one warning"
+        ((my_exit_code+=1))
     fi
     if [[ $error_flag ]]; then
-        msg I "There was at least one ERROR"
-        ((my_retval+=2))
+        msg I "There was at least one error"
+        ((my_exit_code+=2))
     fi
     [[ $interrupt_flag ]] && msg I "There was at least one interrupt"
-    msg I "Exiting with return value $my_retval"
+    msg I "Exiting with return value $my_exit_code"
 
     # Exit
     # ~~~~
-    fct "${FUNCNAME[0]}" 'exiting'
-    exit $my_retval
+    fct "${FUNCNAME[0]}" "exiting $my_exit_code"
+    exit $my_exit_code
 }  # end of function finalise
 
 source "$BUNG_LIB_DIR/get_fs_type.fun" || exit 1
 
 #--------------------------
-# Name: initialise
-# Purpose:
-#   * Sets up environment
-#   * Parses command line
-#   * Interacts with user to get any missing configuration values
-#   * Mounts the backup file system (readonly) if not already mounted
-#   * Creates a temporary directory
-# Arguments: the command line
-# Global variables:
-#   Set:
-#       Various: as commented in the first few parts below
+# name: initialise
+# purpose:
+#   * sets up environment
+#   * parses command line
+#   * interacts with user to get any missing configuration values
+#   * mounts the backup file system (readonly) if not already mounted
+#   * creates a temporary directory
+# arguments: the command line
+# global variables:
+#   set:
+#       various: as commented in the first few parts below
 #       conf_fn: configuration file name
 #       last_backup_subdir: the most recent rsync backup subdirectory to
 #           restore from
 #       restore_dir: directory to restore to
 #       snapshot_flag: the configuration file inclides a snapshot keyword
-#   Read:
-# Output: none
-# Return value: 1 when an error is detected, 0 otherwise
+#   read:
+# output: none
+# return value: 1 when an error is detected, 0 otherwise
 #--------------------------
 function initialise {
-    local args array backup_dir buf cmd enter_my_own fn msg msg_part list_flag my_dest_dir
-    local opt opt_C_flag opt_b_flag opt_r_flag opt_s_flag
+    local args array buf cmd enter_my_own fn msg msg_part list_flag my_dest_dir
+    local opt opt_C_flag opt_b_flag opt_r_flag opt_s_flag opt_t_flag
     local regex valid_keywords view_flag
+    local additional_time_dd_hh_mm_ss d h m s seconds_flag
+    local -r time_days_re='^\+?[[:digit:]]*\.?[[:digit:]]+d$'
+    local -r time_hours_re='^\+?[[:digit:]]*\.?[[:digit:]]+h$'
+    local -r time_minutes_re='^\+?[[:digit:]]*\.?[[:digit:]]+m$'
+    local -r time_seconds_re='^\+?[[:digit:]]*\.?[[:digit:]]+s?$'
 
     # Configure shell environment
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -316,51 +266,56 @@ function initialise {
     shopt -s extglob            # Enable extended pattern matching operators
     unset CDPATH                # Ensure cd behaves as expected
     umask 022
- 
+
     # Initialise some environment variables
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # If these are already set, they are not changed
-    export BUNG_BIN_DIR=${BUNG_BIN_DIR:-/usr/bin}
     export BUNG_ETC_DIR=${BUNG_ETC_DIR:-/etc/bung}
 
     # Initialise some global logic variables
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     readonly false=
     readonly true=true
-    
+ 
     debugging_flag=$false
     error_flag=$false
     finalising_flag=$false
     interrupt_flag=$false
+    menu_used_flag=$false
     tmp_dir_created_flag=$false
     warning_flag=$false
-    
+ 
     # Initialise some global string variables
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    mount_done_mountpoint_idx=-1
-    rsync_idx=-1
-    snapshot_idx=-1
-    tmp_dir=/tmp
-    mount_idx=-1
+    # The mount and snapshot idx variables aere not used by this script but are required by the parse_conf* functions
+    mount_done_mountpoint_idx=-1    
+    snapshot_idx=-1    # Not used but required by the parse_conf* functions
+    mount_idx=-1    # Not used but required by the parse_conf* functions
+    readonly continue_prompt='Enter anything to continue or Ctrl+c to abort'
     readonly msg_date_format='+%H:%M:%S'   # date command format used in messages
     readonly msg_lf=$'\n    '              # message linefeed and indent
     readonly script_name=${0##*/}
+    readonly sig_names=(. $(kill -L | sed 's/[[:digit:]]*)//g'))
 
     # Parse command line
     # ~~~~~~~~~~~~~~~~~~
     args=("$@")
     conf_fn=
     emsg=
+    most_recent_rsync_backup_dir_to_include_in_the_restore=
     opt_b_flag=$false
     opt_c_flag=$false
     opt_r_flag=$false
     opt_s_flag=$false
+    opt_t_flag=$false
+    additional_time=
     restore_dir=
-    while getopts :b:c:dhr:s:v opt "$@"
+    subdir_of_the_backup_to_restore=
+    while getopts :b:c:dhr:s:t:v opt "$@"
     do
         case $opt in
             b )
-                last_backup_subdir=$OPTARG
+                most_recent_rsync_backup_dir_to_include_in_the_restore=$OPTARG
                 opt_b_flag=$true
                 ;;
             c )
@@ -380,8 +335,13 @@ function initialise {
                 opt_r_flag=$true
                 ;;
             s )
-                subdir=$OPTARG
+                subdir_of_the_backup_to_restore=$OPTARG
                 opt_s_flag=$true
+                ;;
+            t )
+                additional_time=$OPTARG
+                additional_time_before_conversion=$OPTARG
+                opt_t_flag=$true
                 ;;
             v )
                 echo "$script_name version $script_ver" >&2
@@ -398,7 +358,9 @@ function initialise {
 
     # Check option arguments
     # ~~~~~~~~~~~~~~~~~~~~~~
-    # No checks are possible
+    if [[ $opt_t_flag ]] && ! ck_additional_time "$additional_time"; then
+        emsg+=$msg_lf"${additional_time_emsg//$'\n'/$'\n    '}"
+    fi
 
     # Test for mutually exclusive options
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -422,13 +384,6 @@ function initialise {
     fi
 
     fct initialise 'started (this message deferred until command line parsed)'
-    
-    # Set traps
-    # ~~~~~~~~~
-    trap 'finalise 129' 'HUP'
-    trap 'finalise 130' 'INT'
-    trap 'finalise 131' 'QUIT'
-    trap 'finalise 143' 'TERM'
 
     # Ensure effective userid is 0 (root)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -437,6 +392,7 @@ function initialise {
     # If the config file not given, ask the user to select
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     if [[ ! $opt_c_flag ]]; then
+        menu_used_flag=$true
         echo $'\n-c option not used; choosing the rsync_bu config file to base the restore on ...'
         cd "$BUNG_ETC_DIR" || finalise 1
         while IFS= read -r -d '' buf
@@ -448,12 +404,12 @@ function initialise {
         while true
         do
             echo $'\nChoose the rsync_bu config file to base the restore on'
-            echo 'To view the file, prefix its number with v'
+            echo 'To view the file, prefix its number with v, exmple v4'
             for ((i=0;i<${#array[*]};i++))
             do
                 echo "   $i ${array[i]}"
             done
-            read -p 'Enter your choice: '
+            read -p 'Enter your choice or Ctrl+c to abort: '
             if [[ ${REPLY,,} =~ ^v ]]; then
                 view_flag=$true
                 index=${REPLY:1}
@@ -473,12 +429,14 @@ function initialise {
             if [[ $view_flag ]]; then
                 echo
                 cat "${array[index]}"
-                read -p $'\nPress Enter to continue: '
+                read -p $'\nPress Enter to continue or Ctrl+c to abort: '
                 continue
             fi
             conf_fn="${array[index]}"
             break
         done
+        cd - >/dev/null || finalise 1
+        show_command_line
     fi
     [[ ! $conf_fn =~ / ]] && conf_fn=$BUNG_ETC_DIR/$conf_fn
 
@@ -490,62 +448,44 @@ function initialise {
 
     # Parse configuration file
     # ~~~~~~~~~~~~~~~~~~~~~~~~
-    emsg=
     # Note: ensure a space on both sides of each string in the arrays
     local -A keyword_validation
-    keyword_validation[name]=' 
+    keyword_validation[name]='
         emailforreport 
         logretention 
         mount 
+        notificationplug_in 
         organisationname 
         rsync 
         shutdown 
         snapshot 
     '
-    keyword_validation[repeat invalid]=' 
+    keyword_validation[repeat_invalid]=' 
         logretention 
         organisationname 
         rsync 
         shutdown 
     '
     local +r keyword_validation
-    parse_conf "$conf_fn" 
+    rsync_keyword_found_flag=$false
+    parse_conf "$conf_fn"
+    [[ ! $rsync_keyword_found_flag ]] && emsg+=$msg_lf"Keyword rsync is required"
     [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
-    # This is a crude test but good enough.  TODO: dependable test?
-    grep --ignore-case --quiet '^[[:space:]]*snapshot' "$conf_fn"
-    (($?==0)) && snapshot_flag=$true || snapshot_flag=$false
 
     # Postprocess and error trap the configuration
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # Only the values needed for restore
-
-    # Mount
-    postprocess_mount_conf
-    err_trap_mount_conf
 
     # rsync
     postprocess_rsync_conf
     err_trap_rsync_conf
-
+    readonly dest_dir
     [[ $emsg != '' ]] && msg E "Error(s) in configuration file $conf_fn:$emsg"
- 
-    # Mount the backup file system if required
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    my_dest_dir=$dest_dir
-    for ((j=0;j<=mount_idx;j++))
-    do
-        fs_file_regex=^${mount_fs_file[j]}
-        if [[ $my_dest_dir =~ $fs_file_regex ]]; then
-            mount_o_option[j]=readonly
-            do_mount $j
-            break
-        fi
-    done
 
     # If the backup subdirectory not given, ask the user to select
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # The "backup subdirectory" is a subdirectory of rsync's --backup directory
     if [[ ! $opt_b_flag ]]; then
+        menu_used_flag=$true
         echo $'\n-b option not used; choosing the backup directory to base the restore on ...'
 
         # Check the rsync backup directory exists
@@ -563,17 +503,17 @@ function initialise {
         do
            array+=("${buf#./}")
         done < <(find -mindepth 3 -maxdepth 3 -type d -print0)
-        cd - >/dev/null
+        cd - >/dev/null || finalise 1
         if [[ ${array[0]:-} = '' ]]; then
             msg_part="No backup subdirectories found under '$backup_dir'"
             msg_part+='.  You do not need this script to restore'
-            msg_part+=".  You can restore by rsyncing from $my_dest_dir" 
+            msg_part+=".  You can restore by rsyncing from $my_dest_dir"
             msg I "$msg_part"
             finalise 0
         fi
 
         # Ask the user to choose the backup subdirectory to restore
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         while true
         do
             echo
@@ -591,7 +531,7 @@ function initialise {
             do
                 echo "   $i ${array[i]}"
             done
-            read -p 'Enter your choice: '
+            read -p 'Enter your choice or Ctrl+c to abort: '
             index=$REPLY
             ck_uint "$index"
             if (($?!=0)); then
@@ -602,9 +542,15 @@ function initialise {
                 echo "Invalid index $index (too big)" >&2
                 continue
             fi
-            last_backup_subdir="${array[index]}"
+            most_recent_rsync_backup_dir_to_include_in_the_restore="${array[index]}"
             break
         done
+        show_command_line
+    else
+        backup_dir=$dest_dir/$rsync_backup_dir
+        backup_dir=${backup_dir//\/*(\/)/\/}    # Change multiple adjacent "/"s to /
+        buf=$(ck_file "$dest_dir/$rsync_backup_dir/$most_recent_rsync_backup_dir_to_include_in_the_restore" d:rx 2>&1)
+        [[ $buf != '' ]] && msg E "-b option $buf"
     fi
 
     # Check the rsync destination directory exists
@@ -612,99 +558,125 @@ function initialise {
     buf=$(ck_file "$dest_dir" d:rx 2>&1)
     [[ $buf != '' ]] && msg E "Original rsync DEST directory: $buf"
 
-    # If a subdirectory not given, ask the user to select
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # This subdirectory is a subdirectory of rsync's DEST argument
+    # Get the directory to restore from
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     if [[ ! $opt_s_flag ]]; then
+        menu_used_flag=$true
         echo $'\n-s option not used; choosing a subdirectory of the original rsync'"'s DEST argument ..."
 
         # Interact with user to choose the subdirectory
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         enter_my_own='Enter my own directory (skip numeric menu)'
-        my_dir=$dest_dir
+        selected_backup_dir=$dest_dir
         while true
         do
             # Build menu
             # ~~~~~~~~~~
-            cd "$my_dir" || finalise 1
+            cd "$selected_backup_dir" || finalise 1
             unset array
             array[0]=$enter_my_own
             array[1]=.
-            while IFS= read -r -d '' buf
-            do
-               array+=("${buf#./}")
-            done < <(find -mindepth 1 -maxdepth 1 -type d -type d -print0)
-            cd - >/dev/null
-            if [[ ${array[1]} = '' ]]; then
-                msg I "No subdirectories found under '$my_dir'"
+            echo $'\nIn this step you choose a directory to restore from.\n'
+            echo "You are working with $selected_backup_dir"
+            echo "* To enter the path of a $dest_dir sub-directory to restore from, choose 0."
+            echo '* To restore from this directory, choose 1.'
+            if [[ $selected_backup_dir = $dest_dir ]]; then
+                while IFS= read -r -d '' buf
+                do
+                   array+=("${buf#./}")
+                done < <(find -mindepth 1 -maxdepth 1 -type d -name "$rsync_backup_dir" -prune -o -type d -print0)
+                n_subdirs=$((${#array[*]}-2))
+                min_index_for_l_or_s=2
+            else
+                array[2]=..
+                while IFS= read -r -d '' buf
+                do
+                   array+=("${buf#./}")
+                done < <(find -mindepth 1 -maxdepth 1 -type d -print0)
+                n_subdirs=$((${#array[*]}-3))
+                min_index_for_l_or_s=3
+                echo '* To go back up a directory, choose 2.'
+            fi
+            cd - >/dev/null || finalise 1
+            if ((n_subdirs==0)); then
+                msg I "No subdirectories found under '$selected_backup_dir'"
                 continue
             fi
-
-            # Ask the user to choose
-            # ~~~~~~~~~~~~~~~~~~~~~~
-            while true
+            echo '* To list the content of a directory, prefix its number with l, for example l4.'
+            echo '* To select from sub-directories of a directory, prefix its number with s, for example s4.'
+            echo '* To abort use Ctrl+c'
+            echo
+            list_flag=$false
+            select_flag=$false
+            for ((i=0;i<${#array[*]};i++))
             do
-                echo
-                echo 'In this step you choose a directory to restore.'
-                echo
-                if [[ $my_dir = $dest_dir ]]; then
-                    echo 'Here are the directories from the last rsync backup.'
-                    echo '* To enter the path of the directory, choose 0.'
-                    echo '* To restore the whole backup, choose 1.'
-                fi
-                echo '* In case you want to list the content of a directory, prefix'
-                echo "  it's number with L, for example L4."
-                echo
-                list_flag=$false
-                for ((i=0;i<${#array[*]};i++))
-                do
-                    echo "   $i ${array[i]}"
-                done
-                read -p 'Enter your choice: '
-                if [[ ${REPLY^^} =~ ^L ]]; then
-                    list_flag=$true
-                    REPLY=${REPLY:1}
-                fi
-                index=$REPLY
-                ck_uint "$index"
-                if (($?!=0)); then
-                    echo "Invalid index '$index' (not an unsigned integer)" >&2
-                    continue
-                fi
-                if ((index>=${#array[*]})); then
-                    echo "Invalid index $index (too big)" >&2
-                    continue
-                fi
-                if ((index==0)); then
-                    [[ $list_flag ]] && msg I "Ignoring invalid L"
-                    while true
-                    do
-                        echo "Choosing a subdirectory of $dest_dir to restore ..."
-                        read -p 'Enter your choice: '
-                        buf=$(ck_file "$dest_dir/$REPLY" d:rx 2>&1)
-                        [[ $buf = '' ]] && break
-                        msg I "$buf"
-                    done
-                    subdir="$REPLY"
-                    break
-                fi
-                if [[ $list_flag ]]; then
-                    my_dir="${array[index]}"
-                else
-                    subdir="${array[index]}"
-                fi
-                break
+                echo "   $i ${array[i]}"
             done
-            [[ ! $list_flag ]] && break
-        done
-    else
-        buf=$(ck_file "$dest_dir/$subdir" d:rx 2>&1)
+
+            # Get user input
+            # ~~~~~~~~~~~~~~
+            read -p 'Enter your choice or Ctrl+c to abort: '
+            if [[ ${REPLY^^} =~ ^L ]]; then
+                list_flag=$true
+                REPLY=${REPLY:1}
+            fi
+            if [[ ${REPLY^^} =~ ^S ]]; then
+                select_flag=$true
+                REPLY=${REPLY:1}
+            fi
+            index=$REPLY
+            ck_uint "$index"
+            if (($?!=0)); then
+                echo "Invalid index '$index' (not an unsigned integer)" >&2
+                read -p "$continue_prompt"
+                continue
+            elif ((index>=${#array[*]})); then
+                echo "Invalid index $index (too big)" >&2
+                read -p "$continue_prompt"
+                continue
+            elif [[ $list_flag ]] && ((index<min_index_for_l_or_s)); then
+                echo "Cannot list item $index"
+                read -p "$continue_prompt"
+                continue
+            elif [[ $select_flag ]] && ((index<min_index_for_l_or_s)); then
+                echo "Cannot select sub-directories of item $index"
+                read -p "$continue_prompt"
+                continue
+            elif ((index==0)); then
+                read -p "$dest_dir sub-directory to restore from: " subdir_of_the_backup_to_restore
+                if ! ck_file "$dest_dir/$subdir_of_the_backup_to_restore" d:rx; then
+                    read -p "$continue_prompt"
+                    continue
+                fi
+            elif ((index==1)); then
+                subdir_of_the_backup_to_restore=${selected_backup_dir#$dest_dir}
+                break
+            elif [[ ${array[2]} = .. ]] && ((index==2)); then
+                selected_backup_dir=${selected_backup_dir%/*}
+                continue
+            elif [[ $list_flag ]]; then
+                backup_dir_to_list="$selected_backup_dir/${array[index]}"
+                echo "Content of directory $backup_dir_to_list:"
+                echo "$(ls -l $backup_dir_to_list)"
+                read -p "$continue_prompt"
+                continue
+            elif [[ $select_flag ]]; then
+                selected_backup_dir+=/${array[index]}
+                continue
+            else
+                msg E "Programming error: ${FUNCNAME[0]}: $LINENO: no if-elif matched"
+            fi
+        done    # Interacting with user to choose backup directory to restore from
+        show_command_line
+    else    # Option -s used
+        buf=$(ck_file "$dest_dir/$subdir_of_the_backup_to_restore" d:rx 2>&1)
         [[ $buf != '' ]] && msg E "$buf"
     fi
 
     # If the restore directory not given, ask the user to select
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     if [[ ! $opt_r_flag ]]; then
+        menu_used_flag=$true
         echo $'\n-r option not used; selecting the directory to restore to'
 
         # Ask the user to choose the restore directory
@@ -744,6 +716,7 @@ function initialise {
             done
             break
         done
+        show_command_line
     else
         if [[ ! -d "$restore_dir" ]]; then
             echo "$restore_dir does not exist.  Create? (Y or N)"
@@ -753,6 +726,33 @@ function initialise {
         fi
     fi
 
+    # Get the additional time
+    # ~~~~~~~~~~~~~~~~~~~~~~~
+    if [[ ! $opt_t_flag ]]; then
+        echo $'\n-t option not used; setting the time after the -b timestamp after which new files are deleted'
+
+        while true
+        do
+            # Ask the user to enter the time
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            menu_used_flag=$true
+            if [[ $additional_time = '' ]]; then
+                read -p 'Enter the time ([[[<days>d]<hours>h]<minutes>m]<seconds>s): ' additional_time
+                if ! ck_additional_time "$additional_time"; then
+                    echo "$additional_time_emsg"
+                    additional_time=
+                    continue
+                fi
+                additional_time_before_conversion=$additional_time
+            fi
+            convert_additional_time_to_seconds
+            break
+        done
+    else
+        convert_additional_time_to_seconds
+    fi
+    show_command_line
+
     # Prompt for restore directory confirmation
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # But not if it is empty
@@ -761,29 +761,15 @@ function initialise {
         while true
         do
             msg=$'\nRestoring from\n'
-            msg+="  $dest_dir/$subdir"$'\n'
+            msg+="  $dest_dir/$subdir_of_the_backup_to_restore"$'\n'
             msg+=$'to\n'
-            msg+="  $restore_dir"$'\n\n'
+            msg+="  $restore_dir"$'\n'
             msg+="Files under $restore_dir may be deleted!!!"$'\n'
-            msg+=$'OK to continue?\n'
             echo "$msg"
-            read -p 'Enter (Y or N): '
+            read -p 'OK to continue?  Enter y or n: '
             [[ ${REPLY^^} = N ]] && finalise 0
             [[ ${REPLY^^} = Y ]] && break
         done
-    fi
-
-    # Create temporary directory
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # If the mktemplate is changed, tmp_dir_regex in the finalise function
-    # may also need to be changed.
-    buf=$(mktemp -d "/tmp/$script_name.XXXXXX" 2>&1)
-    if (($?==0)); then 
-        tmp_dir=$buf
-        tmp_dir_created_flag=$true
-        chmod 700 "$tmp_dir"
-    else
-        msg E "Unable to create temporary directory:$buf"
     fi
 
     fct "${FUNCNAME[0]}" 'returning'
@@ -799,7 +785,7 @@ function initialise {
 #     conf_name
 #     script_name
 # Output: information messages to stdout; the rest to stderr
-# Returns: 
+# Returns:
 #   Does not return (calls finalise) when class is E for error
 #   Otherwise returns 0
 #--------------------------
@@ -813,23 +799,23 @@ function msg {
 
     # Class-dependent set-up
     # ~~~~~~~~~~~~~~~~~~~~~~
-    case "$class" in  
-        D ) 
+    case "$class" in
+        D )
             [[ ! $debugging_flag ]] && return
             prefix='DEBUG: '
-            ;;  
-        E ) 
+            ;;
+        E )
             error_flag=$true
             prefix='ERROR: '
-            ;;  
-        I ) 
+            ;;
+        I )
             prefix=
-            ;;  
-        W ) 
+            ;;
+        W )
             warning_flag=$true
             prefix='WARN: '
-            ;;  
-        * ) 
+            ;;
+        * )
             msg E "msg: programming error: invalid class '$class': '$*'"
     esac
 
@@ -841,20 +827,137 @@ function msg {
     else
         echo "$message_text" >&2
         if [[ $class = E ]]; then
-            [[ ! $finalising_flag ]] && finalise 1 
+            [[ ! $finalising_flag ]] && finalise 1
         fi
-    fi  
+    fi
 
     return 0
 }  #  end of function msg
 
-source "$BUNG_LIB_DIR/my_cat.fun" || exit 1
 source "$BUNG_LIB_DIR/parse_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/parse_conf_rsync.fun" || exit 1
 source "$BUNG_LIB_DIR/parse_conf_word.fun" || exit 1
-source "$BUNG_LIB_DIR/postprocess_mount_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/postprocess_org_name_conf.fun" || exit 1
 source "$BUNG_LIB_DIR/postprocess_rsync_conf.fun" || exit 1
+
+#--------------------------
+# Name: restore
+# Purpose: runs rsync
+# Arguments: none
+# Global variables read
+#   * most_recent_rsync_backup_dir_to_include_in_the_restore (as set by -b option or chosen via interactive menu)
+#   * restore_dir (as set by -r option or chosen via interactive menu)
+# Return code: always 0; does not return on error
+#--------------------------
+function restore {
+    fct "${FUNCNAME[0]}" 'started'
+    local array backup_dir buf i last_one_flag msg newer_fn src
+
+    # The procedure is:
+    #   1. Restore from the last rsync backup
+    #   2. Restore from the rsync backup's backup directories, starting with the most recent and continuing with successively older
+    #      ones up to and including the one named by the user
+    #   3. Delete any files which are newer than the time of the backup named by the user plus any additional time
+
+    # Restore from the last rsync backup
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    msg I "Restoring from the last rsync_bu backup ..."
+    src=$dest_dir/$subdir_of_the_backup_to_restore
+    src=${src//\/*(\/)/\/}    # Change multiple adjacent "/"s to /
+    if [[ $subdir_of_the_backup_to_restore = '' ]]; then
+        rsync -a "$src/" "$restore_dir" --exclude "$rsync_backup_dir"
+    else
+        rsync -a "$src/" "$restore_dir"
+    fi
+
+    # Generate a list of rsync's backup-dirs
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    backup_dir=$dest_dir/$rsync_backup_dir
+    backup_dir=${backup_dir//\/*(\/)/\/}    # Change multiple adjacent "/"s to /
+    cd "$backup_dir" || finalise 1
+    unset array
+    while IFS= read -r buf
+    do
+       array+=("${buf#* ./}")
+    done < <( find -mindepth 3 -maxdepth 3 -type d -printf '%Ts %p\n' | sort -n )
+    cd - >/dev/null || finalise 1
+    [[ ${array[0]:-} = '' ]] \
+        && msg E "No backup subdirectories found under '$backup_dir'"
+
+    # Restore from the changed and deleted files trees, newest to wanted
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    last_one_flag=$false
+    for ((i=${#array[*]}-1;i>0;i--))
+    do
+        [[ ${array[i]} = $most_recent_rsync_backup_dir_to_include_in_the_restore ]] && last_one_flag=$true
+        backup_subdir=$dest_dir/$rsync_backup_dir/${array[i]}
+        src=$backup_subdir/$subdir_of_the_backup_to_restore/
+        src=${src//\/*(\/)/\/}    # Change multiple adjacent "/"s to /
+        if [[ ! -d "$src" ]]; then
+            msg I "No $subdir_of_the_backup_to_restore in $backup_subdir"
+            [[ $last_one_flag ]] && break
+            continue
+        fi
+        msg I "Restoring from ${array[i]} ..."
+        rsync -a "$src" "$restore_dir"
+        [[ $last_one_flag ]] && break
+    done
+
+    # Get the epoch time of the backup named by the user
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # The subdir name is YYYY/Mmm/dd@hh:mm, example: 2014/Nov/23@10:15
+    # The date command accepts dates like 23 Nov 2014 10:15
+    buf=$most_recent_rsync_backup_dir_to_include_in_the_restore
+    buf=$(date --date="${buf:9:2} ${buf:5:3} ${buf:0:4} ${buf:12:5}" +%s)
+    ck_uint "$buf"
+    if (($?!=0)); then
+        msg E "Programming error: ${FUNCNAME[0]}, line $LINENO, buf: $buf"
+    fi
+
+    # Remove files newer than the time of the backup named by the user
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    msg="Removing files newer than $additional_time_before_conversion"
+    msg I "$msg after $most_recent_rsync_backup_dir_to_include_in_the_restore"
+    buf=$(date +%s --date="@$buf")
+    mtime_of_files_to_delete=$(date +%s --date="@$((buf+additional_time))")
+    find "$restore_dir" -type f -newermt "@$mtime_of_files_to_delete" -delete
+
+    fct "${FUNCNAME[0]}" 'returning'
+    return
+}  # end of function restore
+
+#--------------------------
+# Name: show_command_line
+# Purpose: prints the command line equivalent of command line options and menu usage
+#--------------------------
+function show_command_line {
+    fct "${FUNCNAME[0]}" 'started'
+    local cmd_line
+
+    # Nothing to do?
+    # ~~~~~~~~~~~~~~
+    if [[ ! $menu_used_flag ]]; then
+        fct "${FUNCNAME[0]}" 'returning (nothing to do)'
+        return 0
+    fi
+
+    # Build the command line to show
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    cmd_line="$script_name"
+    [[ $most_recent_rsync_backup_dir_to_include_in_the_restore != '' ]] \
+        && cmd_line+=" -b '$most_recent_rsync_backup_dir_to_include_in_the_restore'"
+    [[ $conf_fn != '' ]] && cmd_line+=" -c '$conf_fn'"
+    [[ $restore_dir != '' ]] && cmd_line+=" -r '$restore_dir'"
+    [[ $subdir_of_the_backup_to_restore != '' ]] && cmd_line+=" -s '$subdir_of_the_backup_to_restore'"
+    [[ $additional_time != '' ]] && cmd_line+=" -t '$additional_time_before_conversion'"
+
+    # Display the message
+    # ~~~~~~~~~~~~~~~~~~~
+    echo 'In case you want to abort, the command to run to start over is'
+    echo "$cmd_line"
+
+    fct "${FUNCNAME[0]}" 'returning'
+}  # end of function show_command_line
 
 #--------------------------
 # Name: usage
@@ -867,20 +970,31 @@ function usage {
     # Build the messages
     # ~~~~~~~~~~~~~~~~~~
     usage="usage: $script_name "
-    usage+='[-b backup_subdir] [-c conf] [-d] [-h] [-r restore_dir] [-s subdir] [-v]'
+    usage+='[-b backup_dir] [-c conf] [-d] [-h] [-r restore_dir] [-s subdir] [-t time] [-v]'
     msg='  where:'
-    msg+=$'\n    -b most recent rsync backup subdirectory to be included in the restore'
-    msg+=$'\n       Default: choose one interactively'
-    msg+=$'\n       A YYYY/Mmm/dd@hh:mm subdirectory of the rsync backup directory is required.'
-    msg+=$'\n       The default rsync backup directory is '
-    msg+="'_Changed and deleted files'"
-    msg+=$'\n    -c configuration file name'
-    msg+=$'\n    -d debugging on'
-    msg+=$'\n    -h prints this help and exits'
-    msg+=$'\n    -r directory to restore to.  Default the source directory'
-    msg+=$'\n    -s subdirectory of the backup to restore'
-    msg+=$'\n       Default: choose one interactively'
-    msg+=$'\n    -v prints the script'"'s version and exits"
+    msg+=$'\n    -b names the most recent rsync backup-dir to be included in the restore.'
+    msg+=$'\n       backup_dir format is YYYY/Mmm/dd@hh:mm'
+    msg+=$'\n       rsync backup-dirs can be viewed on the backup file system under the rsync_bu'
+    msg+=$'\n       '"configuration file's DEST directory's backup_dir."
+    msg+=$'\n       '"The default backup_dir is '_Changed and deleted files'"
+    msg+=$'\n       Default: choose one interactively.'
+    msg+=$'\n    -c names the rsync_bu configuration file used for the backups to restore from.'
+    msg+=$'\n       If it does not contain a "/", it is relative to the bung configuration directory, normally /etc/bung.'
+    msg+=$'\n       Default: choose one interactively.'
+    msg+=$'\n    -d turns debugging on.'
+    msg+=$'\n    -h prints this help and exits.'
+    msg+=$'\n    -r names the directory to restore to.'
+    msg+=$'\n       Default: choose one interactively.'
+    msg+=$'\n    -s names the subdirectory of the backup to restore.'
+    msg+=$'\n       '"It is a subdirectory of the rsync_bu's DEST directory."
+    msg+=$'\n       Default: choose one interactively.'
+    msg+=$'\n    -t specifies time after the -b timestamp after which new files are deleted.'
+    msg+=$'\n       time format is [[[<days>d]<hours>h]<minutes>m]<seconds>s'
+    msg+=$'\n       Examples: 0s, 30m0s, 2d12h0m0s'
+    msg+=$'\n       If the rsync_bu backup used snapshot(s), should normally be set to 0s.'
+    msg+=$'\n       Otherwise should be set to the time taken for the backup to run.'
+    msg+=$'\n       Default: set interactively.'
+    msg+=$'\n    -v prints the script'"'s version and exits."
 
     # Display the message(s)
     # ~~~~~~~~~~~~~~~~~~~~~~
@@ -900,7 +1014,5 @@ function usage {
 #--------------------------
 [[ ${BUNG_COMPGEN_DIR:-} != '' ]] && compgen -v >> $BUNG_COMPGEN_DIR/initial.vars
 initialise "${@:-}"
-do_mounts
-err_trap_rsync_files_and_dirs
 restore
 finalise 0

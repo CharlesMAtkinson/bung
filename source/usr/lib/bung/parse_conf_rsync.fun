@@ -64,15 +64,21 @@ function parse_conf_rsync {
     local -r initial_pc_emsg=$pc_emsg
     unparsed_str=$value
 
+    # Note that an 'rsync' keyword was found in the conffile
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # This function is only called when function parse_conf finds a 'rsyn' keyword
+    rsync_keyword_found_flag=$true
+
     # Parse any subkeywords
     # ~~~~~~~~~~~~~~~~~~~~~
     # Syntax:
-    #   rsync = source_dir dest_dir [backup_dir=dir] [--bwlimit=limit]
-    #           [dest_dir_usage_warning=%] [dest_dir_windows]
-    #           [--exclude-from=FILE] [nocompression] [no-numeric-ids]
-    #           [remote_host_timeout=minutes,minutes] [retention=days[,nowarn]]
-    #           [retry=count] [--timeout=seconds] [verbose=level]
-    #   rsync = source_dir dest_dir options=options [dest_dir_usage_warning=%]
+    #   rsync = <src> <dest> [backup_dir=<dir>] [--bwlimit=<limit>]
+    #       [dest_dir_usage_warning=<%>] [dest_dir_windows]
+    #       [--exclude-from=<FILE>] [nocompression] [no-numeric-ids]
+    #       [remote_host_timeout=<minutes,minutes>]
+    #       [retention=<number>[days][,nowarn]]|<number>percent_usage|<number>old_backups[,<number>min_old_backups]]
+    #       [retry=<count>] [--timeout=<seconds>] [verbose=<level>]
+    #   rsync = <src> <dest> options=<options> [dest_dir_usage_warning=<%>]
 
     parse_conf_word $line_n
     if (($?!=0)); then

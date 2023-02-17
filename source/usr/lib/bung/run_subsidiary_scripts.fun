@@ -1,4 +1,4 @@
-# Copyright (C) 2022 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -87,7 +87,7 @@ function run_subsidiary_scripts {
 
         # Prevent trappable signals calling finalise
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        msg I 'Changing signal traps from calling finalise to setting signal_num_received'
+        msg D 'Preventing trappable signals calling finalise'
         signal_num_received=
         set_traps signal_num_received
 
@@ -175,14 +175,16 @@ function run_subsidiary_scripts {
 
         # Effect any signal received while running subsidiary script
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        msg D 'Effecting any signal received while running subsidiary script'
         if [[ $signal_num_received != '' ]]; then
             sleep 15    # For subsidiary script to complete logging
+            msg I "Effecting signal $signal_num_received received while running subsidiary script"
             finalise $((128+signal_num_received))
         fi
 
-        # Make trappable signals call finalise
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        msg I 'Changing signal traps from setting signal_num_received to calling finalise'
+        # Revert trappable signals to call finalise
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        msg D 'Reverting trappable signals to call finalise'
         set_traps finalise
         trap > "$tmp_dir/trap_out"
 

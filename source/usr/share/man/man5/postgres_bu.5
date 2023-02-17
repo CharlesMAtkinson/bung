@@ -1,5 +1,5 @@
 .ig
-Copyright (C) 2021 Charles Atkinson
+Copyright (C) 2023 Charles Michael Atkinson
 
 Permission is granted to make and distribute verbatim copies of this
 manual provided the copyright notice and this permission notice are
@@ -19,7 +19,7 @@ the original English.
 .\" No adjustment (ragged right)
 .na\" No adjusting text
 .nh\" No hyphenation
-.TH postgres_bu 5 "11 Nov 2022" "Auroville" "Version 3.2.7"
+.TH postgres_bu 5 "10 Feb 2023" "Auroville" "Version 3.5.0"
 .SH NAME
 postgres_bu \- configuration for bung's pg_dump and pg_dumpall wrapper
 .SH SYNOPSIS
@@ -32,7 +32,12 @@ postgres_bu \- configuration for bung's pg_dump and pg_dumpall wrapper
 .HP
 \fBOrganisation name\fB\~=\~\fI...
 .HP
-\fBPostgreSQL\~= \fR[\fBdest_dir=\fIdir\fR] \fR[\fBdest_dir_usage_warning=\fI%\fR] \fR[\fBexclude=\fIdb1\fR,\fIdb2\fR\~...] \fR[\fBretention=\fIdays\fR] \fR[\fBtimestamp_format=\fIformat\fR]
+\fBPostgreSQL\~= 
+\fR[\fBdest_dir=\fIdir\fR] 
+\fR[\fBdest_dir_usage_warning=\fI%\fR] 
+\fR[\fBexclude=\fIdb1\fR,\fIdb2\fR\~...] 
+\fR[\fBretention=\fInumber\fR[\fBdays\fR]]|\fB0\fR[\fBdays\fR]]|\fInumber\fBpercent_usage\fR[\fB,\fInumber\fBmin_old_backups\fR]|\fInumber\fBold_backups] 
+\fR[\fBtimestamp_format=\fIformat\fR]
 .HP
 \fBPre-hook\fB\~=\~\fI... 
 .HP
@@ -46,21 +51,7 @@ This page describes the keywords specific to postgres_bu
 The \fBbung-common\fR (5) man page describes
 the configuration file format
 and the common keywords ellipsised in the \fBSYNOPSIS\fR above
-.SH OPTIONS (keywords)
-.TP
-PostgreSQL
-.RS
-.HP
-.nh
-\fBPostgreSQL\~=
-\fR[\fBdest_dir=\fIdir\fR]
-\fR[\fBdest_dir_usage_warning=\fI%\fR]
-\fR[\fBexclude=\fIdb1\fR,\fIdb2\fR\~...]
-\fR[\fBretention=\fIdays\fR]
-\fR[\fBtimestamp_format=\fIformat\fR]
-.P
-Required.
-May be used multiple times.
+.SH OPTIONS (sub-keywords)
 .P
 \fBdest_dir\fR is the directory to write the pg_dump and pg_dumpall files to.
 .br
@@ -80,9 +71,43 @@ Default: 80
 .br
 Default: backup all databases except template0 and template1
 .P
-\fBretention\fR
+\fBretention=\fI...\fR
 .br
-Default: 28 days backup retention
+Specifies old backup files retention.
+.P
+Default: 28 day retention.
+.br
+.RS
+.P
+\fBretention=\fInumber\fR[\fBdays\fR]
+.br
+Specifies the number of days that these files are kept.
+.P
+\fBretention=0\fR[\fBdays\fR]
+.br
+Specifies no removal of old backup files.
+.P
+\fInumber\fBpercent_usage\fR[\fB,\fInumber\fBmin_old_backups\fR]
+.RS
+\fInumber\fBpercent_usage\fR
+.br
+Specifies repeatedly removing the oldest backup file until the file system usage is \fInumber\fR percent or less.
+.P
+When more than one backup is written to the same file system,
+this can result in all the old backup files
+being removed before the specified % file system usage is achieved
+because of space used by another backup.
+.P
+\fInumber\fBpercent_usage\fR\fB,\fInumber\fBmin_old_backups\fR
+.br
+Works like \fInumber\fBpercent_usage\fR except the most recent
+\fInumber\fBmin_old_backups\fR for all databases are not removed.
+.RE
+.P
+\fBretention=\fInumber\fBold_backups\fR 
+.br
+Specifies removing all but the most recent \fInumber\fR old backup files for all databases.
+.RE
 .P
 \fBtimestamp_format\fR timestamp_format is the date command format used to
 generate timestamps for use in backup file names
@@ -96,12 +121,12 @@ Environment variables are described in bung-common (5).
 Default directories are described in bung-common (5).
 .SH EXAMPLES
 Example postgres_bu configuration files are
-normally installed in /usr/share/bung/doc/examples
+normally installed in /usr/share/doc/bung/examples
 .SH AUTHOR
-Charles Atkinson bung@charlesmatkinson.org
+Charles Michael Atkinson bung@charlesmatkinson.org
 .SH SEE ALSO
 \fBbung-common\fR(5 and 8),
 \fBpostgres_bu\fR(8)
 .br
 The bung user guide,
-normally installed in /usr/share/bung/doc
+normally installed in /usr/share/doc/bung
