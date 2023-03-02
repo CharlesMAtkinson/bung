@@ -1,7 +1,16 @@
 --------------------------------------------------------------------------------
+Version 3.5.1  27 Feb 2023
+
+* Issue 20 err_trap_mount_conf: when keyword Snapshot used in debug mode:
+   mount_fs_spec_conf[i]: unbound variable
+
+--------------------------------------------------------------------------------
 Version 3.5.0  10 Feb 2023
 
 * Issue 8: Notifications: create plug-in architecture
+
+Migration notes
+* rsync_bu destination and source computers must both run bung version 3.5.x
 
 --------------------------------------------------------------------------------
 Version 3.4.0  1 Feb 2023

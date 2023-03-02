@@ -1,0 +1,9 @@
+[Unit]
+Description=Remove /var/log/bung/* files more than 122 days (~4 months) old
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/find /var/log/bung/ -maxdepth 1 -name '*.log' -mtime +122 -execdir rm {} +
+
+[Install]
+WantedBy=multi-user.target
