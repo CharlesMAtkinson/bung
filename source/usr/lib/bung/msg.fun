@@ -1,4 +1,4 @@
-# Copyright (C) 2013 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -24,6 +24,8 @@
 #       If "logger" then also send class I messages with logger (to syslog)
 #       If "no_logger" then do not also send class  W and E messages with
 #       logger (to syslog).
+#    $4 timestamp control. Optional
+#       If "no_timestamp" then do not prefix message with a timestamp
 # Global variables read:
 #     conf_name
 #     script_name
@@ -33,7 +35,7 @@
 #   Otherwise returns 0
 #--------------------------
 function msg {
-    local buf class i logger_flag logger_msg message_text prefix
+    local buf class i logger_flag logger_msg message_text prefix timestamp_flag
     local -r regex='^(|(logger)|(no_logger))$'
     local -r max_logger_chars=100000
 
@@ -42,6 +44,7 @@ function msg {
     class="${1:-}"
     message_text="${2:-}"
     [[ ! ${3:-} =~ $regex ]] && msg E "Programming error: invalid ${FUNCNAME[0]} third argument '${3:-}' (does not match regex $regex)"
+    [[ ${4:-} != no_timestamp ]] && timestamp_flag=$true || timestamp_flag=$false
 
     # Class-dependent set-up
     # ~~~~~~~~~~~~~~~~~~~~~~
@@ -97,7 +100,8 @@ function msg {
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
     # Which is to log if such redirection is set up, as is usual
     [[ $subsidiary_mode_flag ]] && prefix="$script_name: $prefix"
-    message_text="$(date "$log_date_format") $prefix$message_text"
+    [[ $timestamp_flag ]] && prefix="$(date "$log_date_format") $prefix"
+    message_text="$prefix$message_text"
     if [[ $class = I ]]; then
         echo "$message_text"
     else

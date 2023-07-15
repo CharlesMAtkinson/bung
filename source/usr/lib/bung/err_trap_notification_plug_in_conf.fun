@@ -64,6 +64,7 @@ function err_trap_notification_plug_in_conf {
             fi
         fi
 
+        # The user is tested out of alphabetical sequence because need to skip the conffile check if the user is not OK
         user_emsg=
         user_OK_flag=$true
         if [[ $user_name = root ]]; then    # The user to run the plug-in is ignored when not being run by root
@@ -75,18 +76,20 @@ function err_trap_notification_plug_in_conf {
             fi
         fi
 
-        conffile=${notification_plug_in_conffile[i]}
-        if [[ ${conffile#*/} = $conffile ]]; then    # conffile does not contain a "/"
-            conf_fn=$conf_dir/$conffile
-        else
-            conf_fn=$conffile
-        fi
-        buf=$(ck_file "$conf_fn" f:r 2>&1)
-        if [[ $buf = '' ]]; then
-            [[ $executable_OK_flag && $user_OK_flag ]] \
-                && run_notification_plug_in -c "$conf_fn" -C -e "$executable" -u "$user"
-        else
-            emsg+=$msg_lf"Notification plug-in configuration file: $buf"
+        conffile=${notification_plug_in_conf_fn[i]}
+        if [[ $conffile != '' ]]; then
+            if [[ ${conffile#*/} = $conffile ]]; then    # conffile does not contain a "/"
+                conf_fn=$conf_dir/$conffile
+            else
+                conf_fn=$conffile
+            fi
+            buf=$(ck_file "$conf_fn" f:r 2>&1)
+            if [[ $buf = '' ]]; then
+                [[ $executable_OK_flag && $user_OK_flag ]] \
+                    && run_notification_plug_in -c "$conf_fn" -C -e "$executable" -u "$user"
+            else
+                emsg+=$msg_lf"Notification plug-in configuration file: $buf"
+            fi
         fi
 
         msg_level=${notification_plug_in_msg_level[i]}

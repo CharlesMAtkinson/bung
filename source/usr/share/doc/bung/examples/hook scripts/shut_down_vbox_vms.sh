@@ -1,10 +1,14 @@
 #!/bin/bash
 
 # Purpose
-#   * A post-hook script for use with bung to start VirtualBox VMs controlled by
+#   * A pre-hook script for use with bung to stop VirtualBox VMs controlled by
 #     instances of vboxvmservice@.service
 #   * For each enabled instance of vboxvmservice@.service:
-#           systemctl start vboxvmservice@<instance_name>.service
+#       If systemd reports the instance as active:
+#           systemctl stop vboxvmservice@<instance_name>.service
+#       As the user named in vboxvmservice@.service:
+#           List running VMs
+#           If the VM is listed, shut it down
 # Notes
 #   * For simplicity the templated service is called vboxvmservice@.service
 #     above and below.  It is actually what is named in the conffile
@@ -17,7 +21,7 @@
 
 # Programmers' notes: bash library
 #   * May be changed by setting environment variable BUNG_LIB_DIR
-export BUNG_LIB_DIR=${BUNG_LIB_DIR:-/usr/lib/bung}
+export BUNG_LIB_DIR=${BUNG_LIB_DIR:-/opt/bung/lib}
 source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 
 # Function call tree
@@ -29,9 +33,9 @@ source "$BUNG_LIB_DIR/version.scrippet" || exit 1
 #    |
 #    +-- get_enabled_instances
 #    |
-#    +-- start_enabled_instances
+#    +-- stop_enabled_instances
 #    |   |
-#    |   +-- start_enabled_instance
+#    |   +-- stop_enabled_instance
 #    |       |
 #    |       + is_vm_running
 #    |
@@ -163,7 +167,7 @@ function get_enabled_instances {
     if [[ $instances != '' ]]; then
          msg I "Found instances: ${instances[*]}"
     else
-         msg E "No instances of $template_fn found"
+         msg I "No instances of $template_fn found"
     fi
 
     fct "${FUNCNAME[0]}" 'returning'
@@ -220,7 +224,7 @@ function initialise {
     # ~~~~~~~~~~~~~~~~~~
     args=("$@")
     args_org="$*"
-    conf_fn=/etc/bung/$my_name.conf
+    conf_fn=/etc/opt/bung/${my_name%.sh}.conf
     emsg=
     opt_r_flag=$false
     while getopts :c:dhr: opt "$@"
@@ -309,7 +313,6 @@ function initialise {
     fi
     [[ $emsg != '' ]] && msg E "$conf_fn$emsg"
     template_fn=$template
-    msg I "Configuration file: $conf_fn"
 
     # Get the user from the template
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -317,6 +320,7 @@ function initialise {
     [[ $buf == '' ]] && msg E "User= not found in $template_fn"
     buf=$(echo "$buf" | head -1 | sed 's/User=//')
     user=$(echo $buf)    # Strip any whitespace
+    msg I "Configuration file: $conf_fn, template: $template, user: $user"
 
 }  # end of function initialise
 
@@ -335,6 +339,7 @@ function is_vm_running {
     cmd=(sudo --user="$user" vboxmanage list runningvms)
     buf=$("${cmd[@]}" 2>&1)
     rc=$?
+    msg D "Output from ${cmd[*]}: $buf"
     ((rc!=0)) && [[ $buf =~ error ]] \
         && msg W "'error' in output from ${cmd[*]}: $buf"
     echo "$buf" | grep --quiet "^\"$vm_name\""
@@ -408,60 +413,74 @@ function msg {
 }  #  end of function msg
 
 #--------------------------
-# Name: start_enabled_instance
+# Name: stop_enabled_instance
 # Purpose: 
 #   * Stop an enabled instance of vboxvmservice@.service
 #--------------------------
-function start_enabled_instance {
+function stop_enabled_instance {
     fct "${FUNCNAME[0]}" 'started'
     local buf rc vm_name
     local -r instance=$1
     local -r sleep=5
-    local -r time_allowed_for_startup=120
+    local -r time_allowed_for_shutdown=120
 
-    # Start the instance
-    # ~~~~~~~~~~~~~~~~~~
-    msg I "Starting $instance"
-    cmd=(systemctl start "$instance")
-    buf=$("${cmd[@]}" 2>&1)
-    [[ $buf != '' ]] && msg W "Unexpected output from ${cmd[*]}: $buf"
-
-    # Did the VM start?
-    # ~~~~~~~~~~~~~~~~~
-    vm_name=$(echo $instance | sed -e 's/.*@//' -e 's/\.service//')
-    msg I "Waiting up to $time_allowed_for_startup seconds for $vm_name to start"
-    for ((i=0;i<time_allowed_for_startup;i=i+sleep))
-    do
-        sleep $sleep
-        is_vm_running "$vm_name"
-        rc=$?
-        ((rc==0)) && break
-    done
-    if ((rc==0)); then
-        msg I "$vm_name is running"
+    # If the instance is active, stop it
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    buf=$(systemctl show "$instance" --property ActiveState --value 2>&1)
+    if [[ $buf == active ]]; then
+        msg I "Instance $instance is active; stopping it"
+        cmd=(systemctl stop "$instance")
+        buf=$("${cmd[@]}" 2>&1)
+        [[ $buf != '' ]] && msg W "Unexpected output from ${cmd[*]}: $buf"
     else
-        msg W "$vm_name did not start"
+        msg I "Instance $instance is not active"
     fi
 
+    # If the VM is running, shut it down
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # This is required in case the VM has been started other than by the systemd instance
+    # The core of this is same as in shut_down_vbox_vm.sh
+    vm_name=$(echo $instance | sed -e 's/.*@//' -e 's/\.service//')
+    msg I "VM name is $vm_name"
+    is_vm_running "$vm_name"
+    rc=$?
+    if ((rc==0)); then
+        msg I "VM $vm_name is running; shutting down via ACPI button as user $user"
+        cmd=(sudo --user="$user" vboxmanage controlvm "$vm_name" acpipowerbutton)
+        buf=$("${cmd[@]}" 2>&1)
+        rc=$?
+        [[ $buf != '' ]] && msg W "Unexpected output from ${cmd[*]}: $buf"
+        msg I "Waiting up to $time_allowed_for_shutdown seconds for $vm_name to shut down"
+        for ((i=0;i<time_allowed_for_shutdown;i=i+sleep))
+        do
+            sleep $sleep
+            is_vm_running "$vm_name"
+            rc=$?
+            ((rc==1)) && break
+        done
+        ((rc==0)) && msg E "Failed to shut down $vm_name. Aborting backup"
+    fi
+    msg I "VM $vm_name is not running"
+
     fct "${FUNCNAME[0]}" 'returning'
-}  # end of function start_enabled_instance
+}  # end of function stop_enabled_instance
 
 #--------------------------
-# Name: start_enabled_instances
+# Name: stop_enabled_instances
 # Purpose: 
 #   * Stop each enabled instance of vboxvmservice@.service
 #--------------------------
-function start_enabled_instances {
+function stop_enabled_instances {
     fct "${FUNCNAME[0]}" 'started'
     local instance 
 
     for instance in $instances
     do
-        start_enabled_instance $instance
+        stop_enabled_instance $instance
     done
 
     fct "${FUNCNAME[0]}" 'returning'
-}  # end of function start_enabled_instances
+}  # end of function stop_enabled_instances
 
 #--------------------------
 # Name: usage
@@ -498,5 +517,5 @@ function usage {
 #--------------------------
 initialise "${@:-}"
 get_enabled_instances
-start_enabled_instances
+stop_enabled_instances
 finalise $pre_hook_rc_i_continue

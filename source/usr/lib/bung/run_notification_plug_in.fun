@@ -18,9 +18,9 @@
 # Name: run_notification_plug_in
 # Purpose: runs a notification plug-in
 # Syntax
-#   run_notification_plug_in -c <conf_fn> -b <body> -e <executable> [-l <log_fn>] -s <subject> -u <user>
+#   run_notification_plug_in [-c <conf_fn>] -b <body> -e <executable> [-l <log_fn>] -s <subject> -u <user>
 #   or
-#   run_notification_plug_in -c <conf_fn> -C -e <executable> -u <user>
+#   run_notification_plug_in [-c <conf_fn>] -C -e <executable> -u <user>
 #   Where
 #       <conf_fn> is the plug-in's configuration file
 #       <body> is a text string to be used as the body of the notification
@@ -44,7 +44,7 @@ function run_notification_plug_in {
     local args opt opt_b_flag opt_c_flag opt_C_flag opt_e_flag opt_l_flag opt_s_flag opt_u_flag
     local buf cmd command msg_class rc
     local body body_fn conf_fn executable subject user
-    local i_msgs e_msgs w_msgs my_emsg unexpected_out
+    local msg_class my_emsg unexpected_out wemsg_flag
     local already_percent_q_flag
 
     # Parse options
@@ -107,7 +107,6 @@ function run_notification_plug_in {
 
     # Test for mandatory options missing
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [[ ! $opt_c_flag ]] && my_emsg+=$msg_lf'-c option is required'
     [[ ! $opt_u_flag ]] && my_emsg+=$msg_lf'-u option is required'
     if [[ ! $opt_C_flag ]]; then
         [[ ! $opt_b_flag ]] && my_emsg+=$msg_lf'-b option is required when option -C is not used'
@@ -121,6 +120,10 @@ function run_notification_plug_in {
 
     # Validate option arguments
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
+    if [[ $opt_c_flag ]];  then
+        buf=$(ck_file "$conf_fn" f:r 2>&1)
+        [[ $buf != '' ]] && my_emsg+=$msg_lf"$buf"
+    fi
     if [[ $opt_l_flag ]];  then
         buf=$(ck_file "$log_fn" f:r 2>&1)
         [[ $buf != '' ]] && my_emsg+=$msg_lf"$buf"
@@ -135,39 +138,36 @@ function run_notification_plug_in {
 
     # Build the command to run the notification plug-in
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    if [[ $user_name = root ]]; then
-        if [[ $opt_C_flag ]]; then    # Error trap the conffile
-            cmd=(su "$user"
-                --shell /bin/bash
-                --command "$(printf '%q' "$executable") -c $(printf '%q' "$conf_fn") -C"
-            )
-        else
-            command="$(printf '%q' "$executable") -b $(printf '%q' "$body") -c $(printf '%q' "$conf_fn")"
-            if [[ $opt_l_flag ]];  then
-                command+=" -l $(printf '%q' "$log_fn")"
-            fi
-            command+=" -s $(printf '%q' "$subject")"
-            cmd=(su "$user"
-                --shell /bin/bash
-                --command "$command"
-            )
+    if [[ $user_name = root && "$user" != root ]]; then      # Need to run via su
+        cmd=$(printf '%q' "$executable")
+        if [[ $opt_c_flag ]]; then
+            cmd+=" -c $(printf '%q' "$conf_fn")"
         fi
+        if [[ $opt_C_flag ]]; then    # Error trap the conffile
+            cmd+=' -C'
+        else
+            cmd+=" -b $(printf '%q' "$body")"
+            [[ $opt_l_flag ]] && cmd+="-l $(printf '%q' "$log_fn")"
+            cmd+=" -s $(printf '%q' "$subject")"
+        fi
+        cmd=(su "$user" --shell /bin/bash --command "$cmd")
         already_percent_q_flag=$true
     else
+        cmd=("$executable")
+        [[ $opt_c_flag ]] && cmd+=(-c "$conf_fn")
         if [[ $opt_C_flag ]]; then    # Error trap the conffile
-            cmd=("$executable" -c "$conf_fn" -C)
+            cmd+=(-C)
         else
-            cmd=("$executable" -b "$body" -c "$conf_fn" -s "$subject")
-            if [[ $opt_l_flag ]];  then
-                cmd+=(-l "$log_fn")
-            fi
+            cmd+=(-b "$body")
+            [[ $opt_l_flag ]] && cmd+=(-l "$log_fn")
+            cmd+=(-s "$subject")
         fi
         already_percent_q_flag=$false
     fi
 
     # Prevent trappable signals calling finalise
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    msg D 'Preventing trappable signals calling finalise'
+    msg D 'Preventing trappable signals calling finalise while the plug-in is being run'
     signal_num_received=
     set_traps signal_num_received
 
@@ -180,17 +180,27 @@ function run_notification_plug_in {
     fi
     buf=$("${cmd[@]}" 2>&1)
     rc=$?
-    i_msgs=$(echo "$buf" | grep '^For bung I ' | sed 's/^For bung I //')
-    w_msgs=$(echo "$buf" | grep '^For bung W ' | sed 's/^For bung W //')
-    e_msgs=$(echo "$buf" | grep '^For bung E ' | sed 's/^For bung E //')
-    unexpected_out=$(echo "$buf" | grep -Ev '^For bung (I|W|E) ')
-    [[ $unexpected_out != '' ]] && msg W "Unexpected output:"$'\n'"$unexpected_out"
-    [[ $i_msgs != '' ]] && msg I "Information messages:"$'\n'"$i_msgs"
+
+    # Log any output from the plug-in and its return code
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    unexpected_out=$(echo "$buf" | grep --extended-regexp --invert-match '^For bung (I|W|E) ')
+    [[ $unexpected_out != '' ]] && msg W "Unexpected output (lines not prefixed with For bung (I|W|E) ):"$'\n'"$unexpected_out"
+    echo "$buf" | grep --extended-regexp --quiet '^For bung (W|E) '
+    (($?!=0)) && wemsg_flag=$false || wemsg_flag=$true
     if [[ $opt_C_flag ]]; then    # Error trapping the conffile
-        [[ $e_msgs != '' ]] && emsg+=$'\n'$e_msgs
+        if [[ $buf != '' ]]; then
+            emsg+=$'\n''==== Output from plug-in starts ===='
+            emsg+=$'\n'"$(echo "$buf" | sed --regexp-extended 's/^For bung (I|W|E) //')"
+            emsg+=$'\n''==== Output from plug-in ends ===='
+        fi
     else
         ((rc==0)) && notification_sent_flag=$true
-        [[ $w_msgs != '' ]] && msg W "Warning messages:"$'\n'"$w_msgs"
+        if [[ $buf != '' ]]; then
+            [[ $wemsg_flag ]] &&  msg_class=W || msg_class=I
+            msg $msg_class '==== Output from plug-in starts ===='
+            msg I "$(echo "$buf" | sed --regexp-extended 's/^For bung (I|W|E) //')" '' no_timestamp
+            msg $msg_class '==== Output from plug-in ends ===='
+        fi
     fi
     ((rc==0)) && msg_class=I || msg_class=W
     msg $msg_class "Notification plug-in return code $rc"

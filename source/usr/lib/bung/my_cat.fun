@@ -1,4 +1,4 @@
-# Copyright (C) 2021 Charles Atkinson
+# Copyright (C) 2023 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,7 +17,7 @@
 #--------------------------
 # Name: my_cat
 # Purpose: 
-#   Same as "cat FILE" (where FILE is not -) except when FILE is > 500,000 bytes.
+#   Same as "cat --show-nonprinting FILE" (where FILE is not -) except when FILE is > 500,000 bytes.
 #   When FILE ($1) is > 500,000 bytes, excerpt the most relevant lines.
 # Arguments:
 #   $1 - pathname of input file

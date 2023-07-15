@@ -317,20 +317,22 @@ function finalise {
                         [[ ${notification_plug_in_conf_err_flag[i]} ]] && continue
                         msg_level=${notification_plug_in_msg_level[i]}
                         [[ $msg_level != I ]] && continue
-                        conffile=${notification_plug_in_conffile[i]}
-                        if [[ ${conffile#*/} = $conffile ]]; then    # conffile does not contain a "/"
-                            conf_fn=$conf_dir/$conffile
-                        else
-                            conf_fn=$conffile
+                        cmd=(run_notification_plug_in -b "No problems detected.  Log file: $log_fn")
+                        conffile=${notification_plug_in_conf_fn[i]}
+                        if [[ $conffile != '' ]]; then
+                            if [[ ${conffile#*/} = $conffile ]]; then    # conffile does not contain a "/"
+                                conf_fn=$conf_dir/$conffile
+                            else
+                                conf_fn=$conffile
+                            fi 
+                            cmd+=(-c "$conf_fn")
                         fi 
                         executable=${notification_plug_in_executable[i]}
-                        cmd=(run_notification_plug_in -b "No problems detected.  Log file: $log_fn" -c "$conf_fn" -e "$executable")
-                        cmd+=(-s "$subject" -u ${notification_plug_in_user[i]})
+                        cmd+=(-e "$executable" -s "$subject" -u "${notification_plug_in_user[i]}")
                         notification_sent_flag=$false
                         "${cmd[@]}"
                         if [[ $notification_sent_flag ]]; then
-                            logger_msg='no problems detected, success report'
-                            logger_msg+=" notified according to $conf_fn"
+                            logger_msg="no problems detected, success report notified by $executable"
                             buf=$(logger -i -t "$script_name+$conf_name" "$logger_msg" 2>&1)
                             [[ $buf != '' ]] && msg E "logger command problem: $buf"
                         fi
@@ -383,26 +385,25 @@ function finalise {
                     body=$body_preamble
                     [[ ! ${notification_plug_in_no_log_flag[i]} ]] \
                         && body+=$'\n'"Here are the contents of $log_fn except for any lines generated after sending this mail"
-                    conffile=${notification_plug_in_conffile[i]}
-                    if [[ ${conffile#*/} = $conffile ]]; then    # conffile does not contain a "/"
-                        conf_fn=$conf_dir/$conffile
-                    else
-                        conf_fn=$conffile
-                    fi  
+                    cmd=(run_notification_plug_in -b "$body")
+                    conffile=${notification_plug_in_conf_fn[i]}
+                    if [[ $conffile != '' ]]; then
+                        if [[ ${conffile#*/} = $conffile ]]; then    # conffile does not contain a "/"
+                            conf_fn=$conf_dir/$conffile
+                        else
+                            conf_fn=$conffile
+                        fi 
+                        cmd+=(-c "$conf_fn")
+                    fi 
                     executable=${notification_plug_in_executable[i]}
-                    cmd=(run_notification_plug_in
-                        -b "$body"
-                        -c "$conf_fn"
-                        -e "$executable"
-                    )
+                    cmd+=(-e "$executable")
                     [[ ! ${notification_plug_in_no_log_flag[i]} ]] \
                         && cmd+=(-l "$log_fn")
-                    cmd+=(-s "$subject" -u ${notification_plug_in_user[i]})
+                    cmd+=(-s "$subject" -u "${notification_plug_in_user[i]}")
                     notification_sent_flag=$false
                     "${cmd[@]}"
                     if [[ $notification_sent_flag ]]; then
-                        logger_msg='Problems detected, report'
-                        logger_msg+=" notified according to $conf_fn"
+                        logger_msg="Problems detected, report notified by $executable"
                         buf=$(logger -i -t "$script_name+$conf_name" "$logger_msg" 2>&1)
                         [[ $buf != '' ]] && msg E "logger command problem: $buf"
                     fi  

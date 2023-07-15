@@ -453,7 +453,7 @@ function parse_conf_notification_plug_in {
     # Parse the value
     # ~~~~~~~~~~~~~~~
     # The value format/syntax is:
-    # Email for report = executable conffile [msg_level=I|W|E] [no_log]
+    # Email for report = executable [conf_fn=file] [msg_level=I|W|E] [no_log]
 
     parse_conf_word $line_n
     if (($?!=0)); then
@@ -461,17 +461,11 @@ function parse_conf_notification_plug_in {
         return 1
     fi
     executable=$parsed_word
-    parse_conf_word $line_n
-    if (($?!=0)); then
-        fct "${FUNCNAME[0]}" 'returning 1'
-        return 1
-    fi
-    conffile=$parsed_word
 
-    if [[ $conffile != '' ]]; then
+    if [[ $executable != '' ]]; then
         idx=$((++notification_plug_in_idx))
         notification_plug_in_executable[idx]=$executable
-        notification_plug_in_conffile[idx]=$conffile
+        notification_plug_in_conf_fn[idx]=
         notification_plug_in_conf_err_flag[idx]=$false
         notification_plug_in_msg_level[idx]=I
         notification_plug_in_no_log_flag[idx]=$false
@@ -480,19 +474,18 @@ function parse_conf_notification_plug_in {
         # Parse any subkeywords
         # ~~~~~~~~~~~~~~~~~~~~~
         local -A subkey_validation
-        subkey_validation[name]=' msg_level no_log user '
-        subkey_validation[value_required]=' msg_level user '
+        subkey_validation[name]=' conf_fn msg_level no_log user '
+        subkey_validation[value_required]=' conf_fn msg_level user '
         subkey_validation[value_invalid]=' no_log '
         local +r subkey_validation
         while [[ $unparsed_str != '' ]]
         do
             parse_conf_subkey_value "${FUNCNAME[0]}" $line_n
+            [[ ${parsed_word,,} = no_log ]] \
+                && notification_plug_in__nolog_flag[idx]=$true
         done
-
-        [[ ${parsed_word,,} = no_log ]] \
-            && notification_plug_in__nolog_flag[idx]=$true
     else
-        pc_emsg+=$msg_lf"Notification plug-in keyword value(s) missing on line $line_n"
+        pc_emsg+=$msg_lf"Notification plug-in keyword value missing on line $line_n"
     fi
 
     [[ $pc_emsg = $initial_pc_emsg ]] && my_rc=0 || my_rc=1
@@ -899,6 +892,9 @@ function parse_conf_subkey_value {
             ;;
         compression )
             compression=$subkey_val
+            ;;
+        conf_fn )
+            notification_plug_in_conf_fn[idx]=$subkey_val
             ;;
         debug )
             subsidiaryscript_debug[subsidiaryscript_idx]=$true

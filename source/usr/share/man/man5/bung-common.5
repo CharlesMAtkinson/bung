@@ -18,7 +18,7 @@ the original English.
 ..
 .\" No adjustment (ragged right)
 .na
-.TH bung-common 5 "27 Feb 2023" "Auroville" "Version 3.5.1"
+.TH bung-common 5 "30 Apr 2023" "Auroville" "Version 3.5.2"
 .SH NAME
 bung \- common configuration for most bung scripts
 .SH SYNOPSIS
@@ -209,7 +209,8 @@ options=credentials=/etc/bung/foo.credentials
 Notification plug-in
 .RS
 .nh
-\fBNotification plug-in = \fIexecutable configuration_file
+\fBNotification plug-in = \fIexecutable
+\fR[\fBconf_fn = \fIfile\fR]
 \fR[\fBmsg_level = \fIlevel\fR]
 \fR[\fBuser = \fIuser\fR]
 \fR[\fBno_log\fR]
@@ -226,12 +227,11 @@ Ignored when command line option \fB-l\~/dev/tty\fR is used.
 \fIexecutable\fR is the plug-in executable.
 It must be accessible when $PATH is /usr/local/bin:/usr/sbin:/sbin:/usr/bin:/bin
 .P
-\fIconfiguration_file\fR is the plug-in's configuration file.
-If it does not contain a "/",
+\fBconf_fn\fR identifies the plug-in's configuration file.
+.br
+If \fIfile\fR does not contain a "/",
 it is relative to the bung configuration directory,
 normally /etc/bung for root and ~/etc/bung for others.
-.br
-For a config file in the current working directory, use ./
 .P
 \fBmsg_level\fR sets the minimum message level at which a notification should be sent.
 .br
