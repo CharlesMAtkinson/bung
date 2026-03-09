@@ -2,7 +2,9 @@
 #
 # Sample MySQL defaults-file for use with mysql_bu
 #
-# Format reference: http://dev.mysql.com/doc/refman/5.5/en/option-files.html
+# Format references: 
+#   http://dev.mysql.com/doc/refman/<version>/en/option-files.html
+#   https://mariadb.com/kb/en/configuring-mariadb-with-option-files
 
 [client]
 user=backup_user

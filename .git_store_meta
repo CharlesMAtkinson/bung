@@ -96,7 +96,7 @@ source/usr/share/doc/bung/examples/script.conf/check_hotplug_usage.sample.conf	f
 source/usr/share/doc/bung/examples/script.conf/hotplug_bu.sample.conf	f	2021-03-20T02:26:02Z
 source/usr/share/doc/bung/examples/script.conf/ldap_bu.sample.conf	f	2021-03-20T02:25:34Z
 source/usr/share/doc/bung/examples/script.conf/mysql-multi.sample.cnf	f	2021-03-20T01:46:21Z
-source/usr/share/doc/bung/examples/script.conf/mysql.sample.cnf	f	2021-03-20T01:51:49Z
+source/usr/share/doc/bung/examples/script.conf/mysql.sample.cnf	f	2024-12-31T11:13:59Z
 source/usr/share/doc/bung/examples/script.conf/mysql_bu.sample.conf	f	2021-03-20T02:26:16Z
 source/usr/share/doc/bung/examples/script.conf/postgres_bu.sample.conf	f	2021-09-17T03:33:21Z
 source/usr/share/doc/bung/examples/script.conf/rsync_bu.sample.conf	f	2021-03-20T02:23:15Z
