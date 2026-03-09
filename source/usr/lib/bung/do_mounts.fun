@@ -1,4 +1,4 @@
-# Copyright (C) 2023 Charles Atkinson
+# Copyright (C) 2026 Charles Atkinson
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -48,7 +48,7 @@ function do_mount {
         mountpoint msg_class msg_part now out_fn rc rc_fn regex \
         return_on_error_flag snapshot_flag tune2fs_out whole_dev
     local fsck_flag=$false
-    local -r fsckable_fstype_regex='^(JFS)|(ext)' 
+    local -r fsckable_fstype_regex='^(JFS)|(ext)|(vfat)' 
 
     # TODO: make these configurable
     local -r my_max_secs_since_last_fsck=$((30*24*60*60))
@@ -103,8 +103,8 @@ function do_mount {
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ((${mount_snapshot_idx[i]}==-1)) && snapshot_flag=$false || snapshot_flag=$true
 
-    # Run fsck when possible and desireable
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Run fsck when possible and desirable
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     if [[ ! $mounted_flag ]]; then
         fsck_flag=$false
         msg_part=
@@ -187,8 +187,17 @@ function do_mount {
                 fi
                 ;;
             vfat )
-                # No method found to see if fsck needs running and it takes
-                # too long to do it every time
+                if [[ ${mount_fsck[i]} ]]; then    # No sub_keyword no_fsck
+                    # fsck.fat 4.2 doesn't have way to detect if the "dirty bit" is set, so there's no quick way to check if it needs fsck. 
+                    # Always check to avoid messages like:
+                    # kernel: FAT-fs (dm-18): Volume was not properly unmounted. Some data may be corrupt. Please run fsck.
+                    [[ $snapshot_flag ]] && msg_part='always run on snapshot' || msg_part=='always run on vfat'
+                    msg I "running fsck on $fs_spec ($msg_part)"
+                    buf=$(fsck.vfat -a "$fs_spec" 2>&1)
+                    rc=$?
+                    ((rc<2)) && msg_class=I || msg_class=W
+                    msg $msg_class "fsck return code $rc, output:"$'\n'"$buf"
+                fi
                 ;;
             * )
                 msg E "$fs_spec is of unsupported type $fs_type"
