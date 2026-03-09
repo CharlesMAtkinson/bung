@@ -70,6 +70,7 @@ function get_x_authority_or_user {
 
     # Common case
     # ~~~~~~~~~~~
+    # TODO: review this and remove if it can't work.  What does '\B[-]auth\s*/var\S*auth\S* match?!
     # The most general match, taken from VirtualGL/Bumblebee code
     # Here is a sample from the wild of what the regex was designed for:
     # /usr/bin/X :0 -auth /var/lib/xdm/authdir/authfiles/A:0-5XTp2J
@@ -89,9 +90,16 @@ function get_x_authority_or_user {
 
         # Has a user logged on?
         # ~~~~~~~~~~~~~~~~~~~~~
-        regex="^[^ ]+ +($current_vt|$display) +"
-        buf=$(w -h -s | grep -E "$regex" 2>&1)
-        if [[ $buf = '' ]]; then    # No so use lightdm's authoity file
+        # Workaround for the w command not displaying the TTY or X display ID
+        # # w -h -s
+        # c                 -                       lightdm --session-child 15 26
+        # # who
+        #c        seat0        2025-05-29 15:33 (:0)
+        #regex="^[^ ]+ +($current_vt|$display) +"
+        #buf=$(w -h -s | grep -E "$regex" 2>&1)
+        regex="^[^ ]+.*\($display\)$"
+        buf=$(who | grep -E "$regex" 2>&1)
+        if [[ $buf = '' ]]; then    # No so use lightdm's authority file
             fct "${FUNCNAME[0]}" "returning (lightdm showing login screen. x_authority_fn:$x_authority_fn)"
             return 0
         elif [[ $buf =~ $regex ]]; then    # Yes so get their name
